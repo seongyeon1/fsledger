@@ -95,6 +95,8 @@ class Config:
     rescan_minutes: int = 15
     # 매일 자동 실행 때 격리한 지 며칠 지난 배치를 영구 삭제할지. 0 이면 끈다 (기본: 끔).
     purge_after_days: int = 0
+    # 허브 본문 검색용 색인(search.db). 끄면 이름·경로로만 찾는다.
+    fulltext: bool = True
     organize_roots: List[OrganizeRoot] = field(
         default_factory=lambda: [
             OrganizeRoot(HOME / "Downloads", group_by_month=True, auto=True),
@@ -106,6 +108,11 @@ class Config:
     def db_path(self) -> Path:
         """SQLite DB 경로."""
         return self.data_dir / "ledger.db"
+
+    @property
+    def search_db_path(self) -> Path:
+        """본문 검색 색인. 지워도 다음 스캔 때 다시 만든다."""
+        return self.data_dir / "search.db"
 
     @property
     def quarantine_dir(self) -> Path:
@@ -148,6 +155,7 @@ def load_config(path: Optional[Path] = None) -> Config:
     cfg.hwp_editor = bool(raw.get("hwp_editor", cfg.hwp_editor))
     cfg.rescan_minutes = max(int(raw.get("rescan_minutes", cfg.rescan_minutes)), 0)
     cfg.purge_after_days = max(int(raw.get("purge_after_days", cfg.purge_after_days)), 0)
+    cfg.fulltext = bool(raw.get("fulltext", cfg.fulltext))
     if "organize" in raw:
         cfg.organize_roots = [
             OrganizeRoot(

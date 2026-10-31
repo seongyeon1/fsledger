@@ -131,6 +131,19 @@ tr.folder .fname .icon { color: var(--accent); }
 .acts { display: flex; flex-wrap: wrap; gap: var(--s-100); align-items: center;
   margin: var(--s-50) 0 0 var(--s-300); color: var(--text-muted); }
 .err { color: var(--danger); }
+.snip { margin: var(--s-50) 0 0 var(--s-300); color: var(--text-secondary); word-break: break-all; }
+.snip mark { background: var(--accent-soft); color: var(--text-primary); border-radius: var(--r-sm); padding: 0 2px; }
+button.badge { font: inherit; cursor: pointer; border: 0; }
+button.badge:hover { color: var(--accent); }
+tr.sub td:first-child { padding-left: var(--s-500); }
+tr.sub .fname .icon { opacity: 0.6; }
+.chips { display: flex; gap: var(--s-50); flex-wrap: wrap; }
+.v-dupes { margin-top: var(--s-200); padding: var(--s-200); border: 1px solid var(--line); border-radius: var(--r-xl); }
+.v-dupes[hidden] { display: none; }
+.v-dupes ul { margin: var(--s-75) 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--s-50); }
+.v-dupes li button { font: inherit; color: var(--text-secondary); background: none; border: 0; padding: 0;
+  text-align: left; cursor: pointer; word-break: break-all; }
+.v-dupes li button:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
 .where { word-break: break-all; color: var(--text-secondary); }
 .where button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   cursor: pointer; border-radius: var(--r-sm); transition: color 300ms var(--ease); }
@@ -287,7 +300,7 @@ dialog.confirm .row { display: flex; gap: var(--s-75); justify-content: flex-end
     <div class="row">
       <label class="field body-6">
         <span class="icon" data-icon="magnifying-glass"></span>
-        <input type="search" id="q" placeholder="이름이나 경로로 찾기, 띄어 쓰면 모두 포함" aria-label="검색">
+        <input type="search" id="q" placeholder="이름·경로·본문으로 찾기, 띄어 쓰면 모두 포함" aria-label="검색">
       </label>
       <select id="sort" class="body-6" aria-label="정렬">
         <option value="mtime">최근 수정순</option>
@@ -302,6 +315,19 @@ dialog.confirm .row { display: flex; gap: var(--s-75); justify-content: flex-end
       </select>
       <button class="chip caption-2" type="button" id="hidden" aria-pressed="false">
         <span class="icon" data-icon="eye-slash"></span>숨김 폴더 포함
+      </button>
+    </div>
+    <div class="row">
+      <div class="chips" id="scope" role="group" aria-label="범위">
+        <button class="chip caption-2" type="button" data-scope="mine" title="git 저장소 밖의 문서만">내 문서</button>
+        <button class="chip caption-2" type="button" data-scope="repo" title="코드 저장소 안의 README·노트 등">저장소 문서</button>
+        <button class="chip caption-2" type="button" data-scope="all">전체</button>
+      </div>
+      <button class="chip caption-2" type="button" id="dupes" aria-pressed="false" title="다른 곳에 내용이 똑같은 파일이 있는 것만">
+        <span class="icon" data-icon="copy"></span>중복 있음
+      </button>
+      <button class="chip caption-2" type="button" id="group" aria-pressed="true" title="같은 폴더의 _v2·최종·(1) 같은 판을 한 줄로 묶기">
+        <span class="icon" data-icon="stack"></span>판 묶기
       </button>
     </div>
     <div class="row" id="kinds" role="group" aria-label="종류"></div>
@@ -355,6 +381,7 @@ dialog.confirm .row { display: flex; gap: var(--s-75); justify-content: flex-end
     <div class="v-meta caption-5" id="v-meta"></div>
     <div class="v-path mono" id="v-path"></div>
     <div class="v-acts" id="v-acts"></div>
+    <div class="v-dupes caption-2" id="v-dupes" hidden></div>
   </div>
   <div class="v-body" id="v-body"></div>
 </section>
@@ -453,8 +480,29 @@ $("theme").onclick = () => {
 };
 setThemeIcon();
 
+// ---- 판 묶기 --------------------------------------------------------------
+// 같은 폴더에서 _v2, 최종, (1), 복사본, 날짜만 다른 이름은 같은 문서의 여러 판으로 본다.
+const VERSION_TAILS = [
+  /\s*\(\d+\)$/,
+  /[\s_.-]*(복사본|사본)(\s*\d+)?$/, /[\s_.-]+copy(\s*\d+)?$/,
+  /[\s_.-]*(최종본?|최최종|진짜\s*최종)$/, /[\s_.-]+(final|수정본?|rev\d*|r\d+|v(er)?\.?\d+(\.\d+)*|\d+차)$/,
+  /[\s_.-]+\d{6,8}$/, /[\s_.-]+\d{4}[.-]\d{2}[.-]\d{2}$/,
+];
+const VERSION_HEADS = [/^\d{6,8}[\s_.-]+/, /^\d{4}[.-]\d{2}[.-]\d{2}[\s_.-]+/];
+function versionKey(name) {
+  const dot = name.lastIndexOf(".");
+  const ext = dot > 0 ? name.slice(dot).toLowerCase() : "";
+  let s = (dot > 0 ? name.slice(0, dot) : name).toLowerCase();
+  for (let prev = ""; prev !== s && s;) {
+    prev = s;
+    for (const re of VERSION_TAILS) s = s.replace(re, "");
+    for (const re of VERSION_HEADS) s = s.replace(re, "");
+  }
+  return (s || name.toLowerCase()) + ext;
+}
+
 // ---- 데이터 펼치기 -------------------------------------------------------
-// 행: [dir, name, kind, project, size, mtime, flags]
+// 행: [dir, name, kind, project, size, mtime, flags, dup]
 const ROOTS = DATA.roots.slice().sort((a, b) => b.path.length - a.path.length);
 const ROOT_LABEL = new Map(DATA.roots.map((r) => [r.path, r.label]));
 const rootOf = (p) => ROOTS.find((r) => p === r.path || p.startsWith(r.path + "/"));
@@ -475,18 +523,25 @@ for (const chain of CHAIN) for (let i = 1; i < chain.length; i++) {
 const ROWS = DATA.rows.map((r) => {
   const dir = DATA.dirs[r[0]];
   return { did: r[0], dir, name: r[1], kind: r[2], pid: r[3], size: r[4], mtime: r[5],
-    cloud: !!(r[6] & 1), hidden: !!(r[6] & 2),
-    path: dir + "/" + r[1], hay: (tilde(dir) + "/" + r[1]).toLowerCase() };
+    cloud: !!(r[6] & 1), hidden: !!(r[6] & 2), repo: !!(r[6] & 4), dup: r[7] ?? -1,
+    path: dir + "/" + r[1], hay: (tilde(dir) + "/" + r[1]).toLowerCase(),
+    vkey: r[0] + "\u0000" + versionKey(r[1]) };
 });
 const BY_PATH = new Map(ROWS.map((r) => [r.path, r]));
+// 내용이 똑같은 파일 묶음. 지우면 BY_PATH 에서 빠지므로 쓸 때마다 남은 것만 본다.
+const DUPES = new Map();
+for (const r of ROWS) if (r.dup >= 0) (DUPES.get(r.dup) || DUPES.set(r.dup, []).get(r.dup)).push(r);
+const dupesOf = (r) => r.dup < 0 ? [] : DUPES.get(r.dup).filter((x) => x !== r && BY_PATH.get(x.path) === x);
 const labelOf = (p) => ROOT_LABEL.get(p) || p.slice(p.lastIndexOf("/") + 1);
 
 // ---- 상태와 주소 ----------------------------------------------------------
 // 화면 상태는 주소 #… 에 담아 뒤로가기·새로고침·링크 공유가 그대로 되게 한다.
-const DEFAULTS = { q: "", kind: -1, dir: "", sort: "mtime", age: 0, view: "" };
-const state = { ...DEFAULTS, hidden: false, side: "folders", shown: PAGE };
+const DEFAULTS = { q: "", kind: -1, dir: "", sort: "mtime", age: 0, view: "", scope: "mine", dupes: 0 };
+const state = { ...DEFAULTS, hidden: false, group: true, side: "folders", shown: PAGE };
+const openGroups = new Set();
 try {
   state.hidden = localStorage.getItem("hub.hidden") === "1";
+  state.group = localStorage.getItem("hub.group") !== "0";
   state.side = localStorage.getItem("hub.side") || "folders";
 } catch (e) {}
 const expanded = new Set();
@@ -505,6 +560,8 @@ function fromHash() {
   state.sort = p.get("sort") || "mtime";
   state.age = Number(p.get("age") || 0);
   state.view = p.get("view") || "";
+  state.scope = ["mine", "repo", "all"].includes(p.get("scope")) ? p.get("scope") : "mine";
+  state.dupes = Number(p.get("dupes") || 0);
 }
 function navigate(changes, { push = true } = {}) {
   const before = toHash(state);
@@ -526,14 +583,43 @@ function syncControls() {
 }
 
 // ---- 거르기 --------------------------------------------------------------
+const inScope = (r) => state.scope === "all" || (state.scope === "repo") === r.repo;
 function filtered({ useDir = true } = {}) {
   const cutoff = state.age ? NOW - state.age * 86400 : 0;
   const terms = state.q.toLowerCase().split(/\s+/).filter(Boolean);
+  const content = contentHits();
   return ROWS.filter((r) =>
-    (state.hidden || !r.hidden) && r.mtime >= cutoff &&
+    (state.hidden || !r.hidden) && r.mtime >= cutoff && inScope(r) &&
     (state.kind < 0 || r.kind === state.kind) &&
+    (!state.dupes || dupesOf(r).length > 0) &&
     (!useDir || !state.dir || r.path.startsWith(state.dir + "/")) &&
-    terms.every((t) => r.hay.includes(t)));
+    (terms.every((t) => r.hay.includes(t)) || content.has(r.path)));
+}
+
+// ---- 본문 검색 ------------------------------------------------------------
+// 이름·경로 검색은 바로 하고, 본문 일치는 서버 색인(search.db)과 Spotlight 에 물어 덧붙인다.
+let CONTENT = new Map(), CONTENT_Q = "", SEARCH_NOTE = "", searchSeq = 0, searchTimer = 0;
+const contentHits = () => CONTENT_Q && CONTENT_Q === state.q.trim() ? CONTENT : new Map();
+function runSearch() {
+  const q = state.q.trim();
+  if (!SERVED || !q || q === CONTENT_Q) return;
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(async () => {
+    const my = ++searchSeq;
+    let res;
+    try { res = await api(`/api/search?q=${encodeURIComponent(q)}`); } catch (e) { return; }
+    if (my !== searchSeq || state.q.trim() !== q) return;
+    const m = new Map(res.hits);
+    for (const p of res.spotlight) if (!m.has(p)) m.set(p, "");
+    CONTENT = m; CONTENT_Q = q;
+    SEARCH_NOTE = res.indexing ? "본문 색인을 만드는 중이라 본문 결과가 덜 나올 수 있습니다" : "";
+    render();
+  }, 200);
+}
+// 서버가 일치 부분을 \x02 … \x03 로 감싸 보낸다. innerHTML 없이 mark 로 바꾼다.
+function snippetNodes(snip) {
+  return snip.split(/(\x02[^\x03]*\x03)/).filter(Boolean).map((part) =>
+    part[0] === "\x02" ? el("mark", { textContent: part.slice(1, -1) }) : document.createTextNode(part));
 }
 const folderMode = () => !!state.dir && !state.q;
 
@@ -544,7 +630,11 @@ function renderMeta() {
   $("meta").textContent = `${at} 확인 · ` + DATA.roots.map((r) => r.label).join(", ");
 }
 function renderHeader() {
-  const vis = ROWS.filter((r) => !r.hidden);
+  const vis = ROWS.filter((r) => !r.hidden && inScope(r));
+  const extra = vis.filter((r) => r.dup >= 0);
+  const seen = new Set();
+  let copies = 0, wasted = 0;
+  for (const r of extra) { if (seen.has(r.dup)) { copies++; wasted += r.size; } else seen.add(r.dup); }
   const recent = vis.filter((r) => NOW - r.mtime < 7 * 86400).length;
   const cloud = vis.filter((r) => r.cloud).length;
   renderMeta();
@@ -557,6 +647,7 @@ function renderHeader() {
     ["프로젝트·폴더", DATA.projects.filter((p) => p.n).length.toLocaleString() + "곳"],
     ["최근 7일 수정", recent.toLocaleString() + "개"],
   ];
+  if (copies) kpis.push(["중복 사본", `${copies.toLocaleString()}개 · ${fmtBytes(wasted)}`]);
   if (cloud) kpis.push(["iCloud에만 있음", cloud.toLocaleString() + "개"]);
   $("kpis").replaceChildren(...kpis.map(([l, v]) =>
     el("div", { className: "kpi" }, el("div", { className: "label caption-2", textContent: l }),
@@ -761,16 +852,35 @@ function actionLinks(r, { compact = false } = {}) {
   return out;
 }
 
-function fileRow(r) {
+function fileRow(r, { versions = null, sub = false } = {}) {
   const link = el("a", { href: toHash({ ...state, view: r.path }), textContent: r.name,
     title: r.cloud ? "iCloud에만 있는 파일입니다" : "미리보기" });
   link.onclick = (e) => { if (e.metaKey || e.ctrlKey) return; e.preventDefault(); openViewer(r.path, link); };
   const acts = el("div", { className: "acts caption-5" }, el("span", { textContent: DATA.kinds[r.kind] }));
   if (r.cloud) acts.append(el("span", { className: "badge" }, icon("cloud"), "iCloud"));
   if (r.hidden) acts.append(el("span", { className: "badge" }, icon("eye-slash"), "숨김 폴더"));
+  if (versions) {
+    const open = openGroups.has(r.vkey);
+    const b = el("button", { className: "badge", type: "button", title: "같은 문서의 다른 판" },
+      icon(open ? "caret-up" : "caret-down"), `판 ${versions.length}개`);
+    b.setAttribute("aria-expanded", String(open));
+    b.onclick = () => { open ? openGroups.delete(r.vkey) : openGroups.add(r.vkey); renderList(); };
+    acts.append(b);
+  }
+  const twins = dupesOf(r);
+  if (twins.length) {
+    const b = el("button", { className: "badge", type: "button", title: "내용이 똑같은 파일이 있는 곳 보기" },
+      icon("copy"), `같은 파일 ${twins.length + 1}곳`);
+    b.onclick = () => openViewer(r.path, b);
+    acts.append(b);
+  }
   acts.append(...actionLinks(r, { compact: true }));
-  const tr = el("tr", {},
-    el("td", {}, el("div", { className: "fname title-4" }, icon(KIND_ICON[r.kind]), link), acts),
+  const content = contentHits();
+  const snip = content.has(r.path)
+    ? el("p", { className: "snip caption-5" }, ...(content.get(r.path) ? snippetNodes(content.get(r.path)) : [icon("magnifying-glass"), " 본문에 검색어가 있습니다 (Spotlight)"]))
+    : null;
+  const tr = el("tr", { className: sub ? "sub" : "" },
+    el("td", {}, el("div", { className: "fname title-4" }, icon(KIND_ICON[r.kind]), link), snip, acts),
     el("td", { className: "c-where" }, whereCell(r)),
     el("td", { className: "num", textContent: fmtTime(r.mtime), title: new Date(r.mtime * 1000).toLocaleString("ko-KR") }),
     el("td", { className: "num c-size", textContent: fmtBytes(r.size) }));
@@ -795,6 +905,27 @@ function folderRow(path, count) {
   return tr;
 }
 
+// 판 묶기: 묶음마다 가장 최근 판을 첫 판 자리에 두고, 펼친 묶음만 나머지 판을 바로 아래에 보인다.
+function collapse(list) {
+  const heads = new Map();
+  for (const r of list) r._sub = false;
+  if (!state.group) return { shown: list, heads };
+  const groups = new Map();
+  for (const r of list) (groups.get(r.vkey) || groups.set(r.vkey, []).get(r.vkey)).push(r);
+  const shown = [], done = new Set();
+  for (const r of list) {
+    const g = groups.get(r.vkey);
+    if (g.length < 2) { shown.push(r); continue; }
+    if (done.has(r.vkey)) continue;
+    done.add(r.vkey);
+    const head = g.reduce((a, b) => (b.mtime > a.mtime ? b : a));
+    heads.set(head, g);
+    shown.push(head);
+    if (openGroups.has(r.vkey)) for (const x of g) if (x !== head) { x._sub = true; shown.push(x); }
+  }
+  return { shown, heads };
+}
+
 function renderList() {
   const pool = filtered().sort(SORTS[state.sort]);
   let folders = [];
@@ -807,13 +938,21 @@ function renderList() {
     folders = [...counts.entries()].sort((a, b) => labelOf(a[0]).localeCompare(labelOf(b[0]), "ko"));
     LIST = pool.filter((r) => r.dir === state.dir);
   } else LIST = pool;
+  const { shown, heads } = collapse(LIST);
+  const nGrouped = LIST.length - shown.length;
+  LIST = shown;
   const bytes = pool.reduce((s, r) => s + r.size, 0);
   const scope = folderMode() ? `하위 폴더 ${folders.length.toLocaleString()}개 · 이 폴더의 파일 ${LIST.length.toLocaleString()}개` : `${LIST.length.toLocaleString()}개`;
+  const nContent = state.q ? LIST.filter((r) => contentHits().has(r.path)).length : 0;
   $("summary").replaceChildren(...[
     el("span", { textContent: `${scope} · 전체 ${fmtBytes(bytes)}` }),
+    nContent ? el("span", { textContent: `본문 일치 ${nContent.toLocaleString()}개` }) : null,
+    nGrouped > 0 ? el("span", { className: "caption-5", textContent: `다른 판 ${nGrouped.toLocaleString()}개 묶음` }) : null,
+    state.q && SEARCH_NOTE ? el("span", { className: "caption-5", textContent: SEARCH_NOTE }) : null,
     LIST.length > state.shown ? el("span", { className: "caption-5", textContent: `위에서 ${state.shown.toLocaleString()}개 표시` }) : null,
   ].filter(Boolean));
-  $("tbody").replaceChildren(...folders.map(([p, c]) => folderRow(p, c)), ...LIST.slice(0, state.shown).map(fileRow));
+  $("tbody").replaceChildren(...folders.map(([p, c]) => folderRow(p, c)),
+    ...LIST.slice(0, state.shown).map((r) => fileRow(r, { versions: heads.get(r) || null, sub: !!r._sub })));
   const foot = $("foot");
   foot.replaceChildren();
   if (!LIST.length && !folders.length) {
@@ -1128,6 +1267,7 @@ function renderViewer() {
     ...(r.cloud ? [el("span", { className: "badge" }, icon("cloud"), "iCloud")] : []));
   $("v-path").textContent = tilde(r.path);
   $("v-acts").replaceChildren(...actionLinks(r));
+  renderTwins(r);
   const i = LIST.findIndex((x) => x.path === r.path);
   $("v-prev").disabled = i <= 0; $("v-next").disabled = i < 0 || i >= LIST.length - 1;
   $("v-close").focus({ preventScroll: true });
@@ -1147,6 +1287,31 @@ function renderViewer() {
     .then((data) => { if (my === seq) renderPreview(r, data); })
     .catch((e) => { if (my === seq) body.replaceChildren(notice("warning", e.message)); });
 }
+// 내용이 똑같은 파일: 다른 위치를 보여 주고, 이 파일만 남기고 나머지를 한 번에 격리한다.
+function renderTwins(r) {
+  const box = $("v-dupes"), twins = dupesOf(r);
+  box.hidden = !twins.length;
+  if (!twins.length) { box.replaceChildren(); return; }
+  const list = el("ul", {}, ...twins.map((t) => {
+    const b = el("button", { type: "button", textContent: tilde(t.path), title: "이 사본 열기" });
+    b.onclick = () => navigate({ view: t.path }, { push: false });
+    return el("li", {}, b);
+  }));
+  const keep = el("button", { className: "btn button-sm danger", type: "button" }, icon("trash"), `이 파일만 남기고 ${twins.length}개 격리`);
+  keep.onclick = () => ask({
+    title: "중복 사본을 정리할까요?", name: tilde(r.path), from: keep,
+    detail: `이 파일은 그대로 두고, 내용이 똑같은 사본 ${twins.length}개(${fmtBytes(twins.reduce((s, t) => s + t.size, 0))})를 격리 폴더로 옮깁니다. ` + QUARANTINE_NOTE,
+    run: async () => {
+      const res = await POST("/api/trash-many", { paths: twins.map((t) => t.path) });
+      removeRows(twins);
+      renderTwins(r); render();
+      toast(`사본 ${twins.length}개를 격리 폴더로 옮겼습니다`, "되돌리기", () => undoDelete(twins, res.batch, `사본 ${twins.length}개`));
+    },
+  });
+  box.replaceChildren(
+    el("p", { className: "title-4" }, icon("copy"), ` 내용이 똑같은 파일이 ${twins.length}곳 더 있습니다`),
+    list, keep);
+}
 $("v-close").onclick = closeViewer;
 $("scrim").onclick = closeViewer;
 $("v-prev").onclick = () => step(-1);
@@ -1163,7 +1328,7 @@ document.addEventListener("keydown", (e) => {
 const dialog = $("confirm");
 $("del-folder").append(icon("trash"), "이 폴더 삭제");
 $("del-folder").onclick = () => confirmDeleteFolder(state.dir, $("del-folder"));
-const QUARANTINE_NOTE = "바로 지우지 않고 격리 폴더(~/.fsledger/quarantine)로 옮깁니다. 알림의 되돌리기나 fsledger undo 로 복구할 수 있고, fsledger purge 를 실행하기 전까지 남아 있습니다.";
+const QUARANTINE_NOTE = "바로 지우지 않고 격리 폴더(~/.fsledger/quarantine)로 옮깁니다. 알림의 되돌리기나 오른쪽 위 격리함에서 복원할 수 있고, 영구 삭제하기 전까지 남아 있습니다.";
 const POST = (path, body) => api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 let pending = null;
 
@@ -1344,7 +1509,12 @@ function toast(msg, action, fn) {
 
 // ---- 그리기 --------------------------------------------------------------
 function render() {
+  runSearch();
   $("hidden").setAttribute("aria-pressed", String(state.hidden));
+  $("dupes").setAttribute("aria-pressed", String(!!state.dupes));
+  $("group").setAttribute("aria-pressed", String(state.group));
+  document.querySelectorAll("#scope [data-scope]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.scope === state.scope)));
+  renderHeader();
   renderKinds();
   renderSide();
   renderCrumbs();
@@ -1359,6 +1529,15 @@ $("q").addEventListener("input", (e) => {
 });
 $("sort").onchange = (e) => navigate({ sort: e.target.value }, { push: false });
 $("age").onchange = (e) => navigate({ age: Number(e.target.value) }, { push: false });
+document.querySelectorAll("#scope [data-scope]").forEach((b) => {
+  b.onclick = () => navigate({ scope: b.dataset.scope }, { push: false });
+});
+$("dupes").onclick = () => navigate({ dupes: state.dupes ? 0 : 1 }, { push: false });
+$("group").onclick = () => {
+  state.group = !state.group;
+  try { localStorage.setItem("hub.group", state.group ? "1" : "0"); } catch (err) {}
+  render();
+};
 $("hidden").onclick = () => {
   state.hidden = !state.hidden;
   try { localStorage.setItem("hub.hidden", state.hidden ? "1" : "0"); } catch (err) {}

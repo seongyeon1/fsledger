@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import List, Optional, Sequence
 
-from fsledger import dupes, hub, junk, ops, organize, report
+from fsledger import dupes, fulltext, hub, junk, ops, organize, report
 from fsledger.config import Config, load_config
 from fsledger.db import connect
 from fsledger.scan import ScanAborted, print_progress, run_scan
@@ -64,6 +64,10 @@ def cmd_report(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) 
     plan = organize.plan(cfg, skip)
     path = report.write_dashboard(cfg, report.build_data(conn, cfg, groups, suggestions, plan))
     hub_path = hub.write_hub(cfg, hub.build_data(conn, cfg))
+    if cfg.fulltext:
+        n_new, n_gone = fulltext.update_index(conn, cfg)
+        if not getattr(args, "quiet", False) and (n_new or n_gone):
+            print(f"본문 색인: 새로 읽음 {n_new:,}개 · 뺌 {n_gone:,}개", file=sys.stderr)
     wasted = sum(g.wasted for g in groups)
     print(
         f"대시보드: {path}\n문서·데이터 허브: {hub_path}\n"

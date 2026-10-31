@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Set, Tuple
 from urllib.parse import parse_qs, unquote, urlparse
 
-from fsledger import hub, ops, page, preview
+from fsledger import dupes, fulltext, hub, ops, page, preview
 from fsledger.config import Config
 from fsledger.db import connect
 from fsledger.scan import run_scan
@@ -110,7 +110,10 @@ class HubApp:
         self.token = secrets.token_urlsafe(24)
         self._lock = threading.Lock()
         self._html: Optional[str] = None
-        self._snapshot: Optional[int] = None
+        self._version: Optional[str] = None
+        # 스캔 뒤 중복 해시가 새로 채워지면 올린다. 파일 변경이 없어도 허브를 다시 그려야 한다.
+        self.derived = 0
+        self.indexing = False
         self.batches: Set[str] = set()  # 이 서버에서 만든 삭제 배치만 되돌릴 수 있다
         self.saves: Dict[str, str] = {}  # 저장 배치 → 저장한 파일 경로
         self.bin_sizes: Dict[str, int] = {}  # 격리 배치 → 디스크 크기 (격리함 목록용)
@@ -123,15 +126,21 @@ class HubApp:
         """요청마다 새 연결 (sqlite 연결은 스레드끼리 나눠 쓰지 않는다)."""
         return connect(self.cfg.db_path)
 
+    def version(self, conn: sqlite3.Connection) -> str:
+        """허브 내용의 버전: 내용이 바뀐 스냅샷 + 이 서버에서 새로 채운 중복 해시."""
+        return f"{hub.content_version(conn)}.{self.derived}"
+
     def page_html(self) -> str:
-        """스냅샷이 바뀌었을 때만 허브 페이지를 다시 만든다."""
+        """버전이 바뀌었을 때만 허브 페이지를 다시 만든다."""
         conn = self.conn()
         try:
-            snap = hub.content_version(conn)
+            version = self.version(conn)
             with self._lock:
-                if self._html is None or snap != self._snapshot:
-                    self._html = page.build("hub.html", hub.build_data(conn, self.cfg))
-                    self._snapshot = snap
+                if self._html is None or version != self._version:
+                    data = hub.build_data(conn, self.cfg)
+                    data["version"] = version
+                    self._html = page.build("hub.html", data)
+                    self._version = version
                 return self._html
         finally:
             conn.close()
@@ -141,13 +150,14 @@ class HubApp:
         conn = self.conn()
         try:
             last = conn.execute("SELECT MAX(finished_at) FROM snapshots").fetchone()[0]
-            version = hub.content_version(conn)
+            version = self.version(conn)
         finally:
             conn.close()
         return {
             "version": version,
             "scanned_at": last,
             "scanning": self.scanning,
+            "indexing": self.indexing,
             "error": self.scan_error,
         }
 
@@ -166,6 +176,14 @@ class HubApp:
                 conn = self.conn()
                 try:
                     run_scan(conn, self.cfg)
+                    if any(dupes.hash_candidates(conn, self.cfg.dupe_min_size)):
+                        self.derived += 1
+                    if self.cfg.fulltext:
+                        self.indexing = True
+                        try:
+                            fulltext.update_index(conn, self.cfg)
+                        finally:
+                            self.indexing = False
                 finally:
                     conn.close()
                 self.scan_error = None
@@ -273,6 +291,19 @@ def make_handler(app: HubApp) -> type:
                     return self._json(HTTPStatus.OK, {"items": items})
                 finally:
                     conn.close()
+            if route == "/api/search":
+                if not self._token_ok(self.headers.get("X-Fsledger-Token")):
+                    return self._deny()
+                text = q.get("q", "")[:200]
+                hits = fulltext.search(app.cfg, text) if app.cfg.fulltext else []
+                return self._json(
+                    HTTPStatus.OK,
+                    {
+                        "hits": hits,
+                        "spotlight": fulltext.spotlight(app.cfg, text),
+                        "indexing": app.indexing,
+                    },
+                )
             if route == "/api/preview":
                 if not self._token_ok(self.headers.get("X-Fsledger-Token")):
                     return self._deny()
@@ -327,6 +358,8 @@ def make_handler(app: HubApp) -> type:
                 return self._trash(body)
             if route == "/api/trash-folder":
                 return self._trash_folder(body)
+            if route == "/api/trash-many":
+                return self._trash_many(body)
             if route == "/api/undo":
                 return self._undo(body)
             if route == "/api/undo-save":
@@ -352,6 +385,40 @@ def make_handler(app: HubApp) -> type:
             if path is None:
                 return self._deny(HTTPStatus.NOT_FOUND)
             return self._quarantine(str(path), "허브에서 삭제")
+
+        def _trash_many(self, body: Dict[str, Any]) -> None:
+            # 중복 사본 정리: 여러 파일을 한 배치로 격리해 한 번에 되돌릴 수 있게 한다.
+            raw = body.get("paths")
+            if not isinstance(raw, list) or not 0 < len(raw) <= 500:
+                return self._deny(HTTPStatus.BAD_REQUEST)
+            paths = [self._file({"path": str(p)}) for p in raw]
+            if any(p is None for p in paths):
+                return self._deny(HTTPStatus.NOT_FOUND)
+            batch = ops.new_batch_id("clean")
+            moves = [
+                ops.Move(
+                    "quarantine",
+                    str(p),
+                    ops.quarantine_target(app.cfg, batch, str(p)),
+                    "허브에서 중복 정리",
+                )
+                for p in paths
+                if p is not None
+            ]
+            conn = app.conn()
+            try:
+                res = ops.apply(conn, moves, batch)
+            finally:
+                conn.close()
+            if res.done:
+                app.batches.add(batch)
+                app.sync()
+            if res.done != len(moves):
+                return self._json(
+                    HTTPStatus.CONFLICT,
+                    {"error": f"{len(moves) - res.done}개를 옮기지 못했습니다", "batch": batch},
+                )
+            return self._json(HTTPStatus.OK, {"ok": True, "batch": batch})
 
         def _trash_folder(self, body: Dict[str, Any]) -> None:
             conn = app.conn()
@@ -390,7 +457,7 @@ def make_handler(app: HubApp) -> type:
                 res = ops.undo(conn, app.cfg, batch)
             finally:
                 conn.close()
-            if res.done != 1:
+            if not res.done or res.failed or res.skipped:
                 return self._json(
                     HTTPStatus.CONFLICT,
                     {"error": "되돌리지 못했습니다. 원래 자리에 같은 이름의 파일이 있습니다"},

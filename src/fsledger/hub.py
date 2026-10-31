@@ -123,8 +123,9 @@ def content_version(conn: sqlite3.Connection) -> int:
 def build_data(conn: sqlite3.Connection, cfg: Config) -> Dict[str, Any]:
     """허브 페이지가 쓰는 JSON 을 만든다.
 
-    행은 [폴더 번호, 이름, 종류, 프로젝트, 크기, 수정 시각(초), 플래그] 배열이다.
-    플래그 bit0 = iCloud 에만 있음, bit1 = 숨김 폴더 안.
+    행은 [폴더 번호, 이름, 종류, 프로젝트, 크기, 수정 시각(초), 플래그, 중복 묶음] 배열이다.
+    플래그 bit0 = iCloud 에만 있음, bit1 = 숨김 폴더 안, bit2 = git 저장소 안.
+    중복 묶음은 내용이 똑같은 허브 파일끼리 같은 번호, 없으면 -1.
     """
     roots = sorted((str(r) for r in cfg.roots), key=len, reverse=True)
     repos = {r[0] for r in conn.execute("SELECT path FROM repos")}
@@ -134,8 +135,10 @@ def build_data(conn: sqlite3.Connection, cfg: Config) -> Dict[str, Any]:
     dirs: Dict[str, int] = {}
     project_rows: List[Dict[str, Any]] = []
     rows: List[List[Any]] = []
-    for path, size, mtime_ns, in_repo in conn.execute(
-        "SELECT path, size, mtime_ns, in_repo FROM file_versions WHERE valid_to IS NULL"
+    hashes: List[Optional[str]] = []
+    for path, size, mtime_ns, in_repo, content_hash in conn.execute(
+        "SELECT path, size, mtime_ns, in_repo, content_hash FROM file_versions"
+        " WHERE valid_to IS NULL"
     ):
         root = next((r for r in roots if path.startswith(r + "/")), None)
         kind = kind_of(path, bool(in_repo))
@@ -150,10 +153,17 @@ def build_data(conn: sqlite3.Connection, cfg: Config) -> Dict[str, Any]:
             cloud = is_dataless(Path(path))
         except OSError:
             continue  # 마지막 스캔 뒤로 사라진 파일
-        flags = int(cloud) | int(in_hidden_dir(path, root)) << 1
+        flags = int(cloud) | int(in_hidden_dir(path, root)) << 1 | int(bool(in_repo)) << 2
         parent, name = os.path.split(path)
         did = dirs.setdefault(parent, len(dirs))
         rows.append([did, name, kinds.index(kind), pid, size, mtime_ns // 1_000_000_000, flags])
+        hashes.append(content_hash)
+
+    # 내용 해시가 같은 허브 파일끼리 묶는다. 해시는 크기가 겹치는 파일만 스캔이 채운다.
+    same = Counter(h for h in hashes if h)
+    group: Dict[str, int] = {}
+    for row, h in zip(rows, hashes, strict=True):
+        row.append(group.setdefault(h, len(group)) if h and same[h] > 1 else -1)
 
     counts = Counter(r[3] for r in rows)
     for i, p in enumerate(project_rows):

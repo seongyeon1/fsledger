@@ -353,6 +353,35 @@ class TestQuarantineBin:
         _wait_scan(app)
 
 
+class TestSearchAndDupes:
+    """본문 검색 API 와 중복 사본 일괄 격리."""
+
+    def test_search_endpoint(self, running: tuple) -> None:
+        app, root = running
+        tok = {"X-Fsledger-Token": app.token}
+        assert _req(app, "GET", "/api/search?q=body")[0] == 403
+        app.sync()
+        _wait_scan(app)  # 스캔 뒤 색인까지 만든다
+        status, raw = _req(app, "GET", "/api/search?q=bod", tok)
+        data = json.loads(raw)
+        assert status == 200 and [h[0] for h in data["hits"]] == [str(root / "a.md")]
+
+    def test_trash_many_one_batch(self, running: tuple) -> None:
+        app, root = running
+        tok = {"X-Fsledger-Token": app.token}
+        body = json.dumps({"paths": [str(root / "a.md"), str(root / "b.pdf")]}).encode()
+        status, raw = _req(app, "POST", "/api/trash-many", tok, body)
+        batch = json.loads(raw)["batch"]
+        assert status == 200 and not (root / "a.md").exists() and not (root / "b.pdf").exists()
+        undo = json.dumps({"batch": batch}).encode()
+        assert _req(app, "POST", "/api/undo", tok, undo)[0] == 200
+        assert (root / "a.md").exists() and (root / "b.pdf").exists()
+        bad = json.dumps({"paths": [str(root / "a.md"), "/etc/hosts"]}).encode()
+        assert _req(app, "POST", "/api/trash-many", tok, bad)[0] == 404
+        assert (root / "a.md").exists()  # 하나라도 안 되면 아무것도 옮기지 않는다
+        _wait_scan(app)
+
+
 class TestTrashFolder:
     """폴더 삭제: 루트·데이터 폴더·모르는 폴더·심볼릭 링크는 거부, 폴더째 격리 후 되돌린다."""
 

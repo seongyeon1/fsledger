@@ -72,6 +72,26 @@ class TestHub:
         assert rows["loose.pdf"]["project"] == "home (낱개 파일)"
         assert rows["plan.md"]["flags"] & 2  # 숨김 폴더 안
         assert not rows["raw.csv"]["flags"] & 2
+        assert rows["README.md"]["flags"] & 4  # git 저장소 안
+        assert not rows["memo.docx"]["flags"] & 4
+
+    def test_duplicate_groups_span_folders(self, env: tuple) -> None:
+        """내용이 같은 허브 파일은 폴더가 달라도 같은 묶음 번호를 받는다."""
+        # Given
+        cfg, conn, root = env
+        _write(root / "a/report.pdf", b"same bytes" * 50)
+        _write(root / "b/c/report copy.pdf", b"same bytes" * 50)
+        _write(root / "a/other.pdf", b"different" * 50)
+        run_scan(conn, cfg)
+        dupes.hash_candidates(conn, cfg.dupe_min_size)
+
+        # When
+        data = hub.build_data(conn, cfg)
+        dup = {r[1]: r[7] for r in data["rows"]}
+
+        # Then
+        assert dup["report.pdf"] >= 0 and dup["report.pdf"] == dup["report copy.pdf"]
+        assert dup["other.pdf"] == -1
 
     def test_write_hub_embeds_data(self, env: tuple) -> None:
         """템플릿 자리표시가 데이터로 바뀐 단일 파일을 쓴다."""
