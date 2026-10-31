@@ -89,6 +89,8 @@ class Config:
     ignore_dirs: List[str] = field(default_factory=lambda: list(DEFAULT_IGNORE_DIRS))
     dupe_min_size: int = 1024
     organize_min_age_days: int = 2
+    # 한글 편집기는 외부(rhwp-studio) 화면을 불러오므로 직접 켜야 한다.
+    hwp_editor: bool = False
     organize_roots: List[OrganizeRoot] = field(
         default_factory=lambda: [
             OrganizeRoot(HOME / "Downloads", group_by_month=True, auto=True),
@@ -139,6 +141,7 @@ def load_config(path: Optional[Path] = None) -> Config:
         cfg.ignore_dirs = list(raw["ignore_dirs"])
     cfg.dupe_min_size = int(raw.get("dupe_min_size", cfg.dupe_min_size))
     cfg.organize_min_age_days = int(raw.get("organize_min_age_days", cfg.organize_min_age_days))
+    cfg.hwp_editor = bool(raw.get("hwp_editor", cfg.hwp_editor))
     if "organize" in raw:
         cfg.organize_roots = [
             OrganizeRoot(

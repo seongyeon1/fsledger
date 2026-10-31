@@ -37,7 +37,7 @@ KINDS: Dict[str, Tuple[str, ...]] = {
         ".npz",
     ),
     "노트북": (".ipynb",),
-    "다이어그램": (".drawio", ".excalidraw"),
+    "다이어그램": (".drawio", ".excalidraw", ".mmd", ".mermaid"),
 }
 _KIND_OF = {ext: kind for kind, exts in KINDS.items() for ext in exts}
 

@@ -24,9 +24,15 @@ MAX_COLS = 60
 MAX_ZIP_MEMBER = 64 * 1024 * 1024
 MAX_NOTEBOOK = 20 * 1024 * 1024
 
-TEXT_EXTS = {".txt", ".json", ".jsonl", ".ndjson", ".drawio", ".excalidraw"}
+MAX_DIAGRAM = 8 * 1024 * 1024  # excalidraw 는 이미지를 품고 있어 크다
+
+TEXT_EXTS = {".txt", ".json", ".jsonl", ".ndjson", ".drawio"}
 TEXTUTIL_EXTS = {".doc", ".docx", ".rtf", ".odt"}
+MERMAID_EXTS = {".mmd", ".mermaid"}
+HWP_EXTS = {".hwp", ".hwpx"}
 INLINE_EXTS = {".pdf": "application/pdf"}
+# /api/raw 로 원본 바이트를 내보내는 형식. 한글은 화면에서 rhwp 가 직접 그린다.
+RAW_EXTS = {**INLINE_EXTS, ".hwp": "application/x-hwp", ".hwpx": "application/hwp+zip"}
 
 _NS_SHEET = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 _NS_REL = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
@@ -220,6 +226,16 @@ def _notebook(path: Path) -> Dict[str, Any]:
     return {"type": "notebook", "cells": cells}
 
 
+def _excalidraw(path: Path) -> Dict[str, Any]:
+    if path.stat().st_size > MAX_DIAGRAM:
+        raise PreviewError("다이어그램이 너무 커서 미리보기를 만들지 않았습니다")
+    text = path.read_text(encoding="utf-8", errors="replace")
+    scene = json.loads(text)
+    if not isinstance(scene, dict) or not isinstance(scene.get("elements"), list):
+        raise PreviewError("Excalidraw 파일이 아닙니다")
+    return {"type": "excalidraw", "text": text}
+
+
 def preview(path: Path) -> Dict[str, Any]:
     """미리보기 데이터. 지원하지 않는 종류면 type=unsupported."""
     ext = path.suffix.lower()
@@ -235,6 +251,13 @@ def preview(path: Path) -> Dict[str, Any]:
             return {"type": "markdown", "text": text, "truncated": truncated}
         if ext in TEXT_EXTS:
             return _text(path)
+        if ext in MERMAID_EXTS:
+            text, truncated = _read_text(path)
+            return {"type": "mermaid", "text": text, "truncated": truncated}
+        if ext == ".excalidraw":
+            return _excalidraw(path)
+        if ext in HWP_EXTS:
+            return {"type": "hwp"}
         if ext in (".csv", ".tsv"):
             return _csv(path)
         if ext == ".xlsx":

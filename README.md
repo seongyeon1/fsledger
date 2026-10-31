@@ -62,8 +62,11 @@ fsledger hub --open          # 파일로만 열기: ~/.fsledger/hub.html (scan·
   위쪽 경로 표시와 상위 폴더 버튼으로 이동한다.
 - **뒤로가기**: 폴더·필터·열어 본 파일이 주소(`#…`)에 남아서 브라우저 뒤로·앞으로·새로고침이 그대로 된다.
 - **뷰어**: 파일 이름을 누르면 오른쪽에 열린다. PDF, 마크다운, 텍스트·JSON, CSV, 엑셀, 워드
-  (macOS textutil), 파워포인트(슬라이드 글자), 노트북을 미리 본다. `j`/`k`로 다음·이전 파일, `Esc`로 닫는다.
+  (macOS textutil), 파워포인트(슬라이드 글자), 노트북, 한글(HWP·HWPX), mermaid(`.mmd`·`.mermaid`, 마크다운 안의
+  ```` ```mermaid ```` 블록 포함), Excalidraw를 미리 본다. `j`/`k`로 다음·이전 파일, `Esc`로 닫는다.
   iCloud에만 있는 파일은 읽지 않는다.
+- **한글 편집**: `config.toml`에 `hwp_editor = true`를 넣으면 한글 파일 뷰어에 "편집" 버튼이 생긴다.
+  저장하면 원본은 격리 폴더에 백업되고 알림의 되돌리기로 돌아간다.
 - **삭제**: 파일은 뷰어의 삭제 버튼, 폴더는 폴더 줄의 휴지통이나 경로 표시 오른쪽 "이 폴더 삭제"로 지운다.
   바로 지우지 않고 격리 폴더로 옮기며, 알림의 되돌리기나 `fsledger undo`로 복구한다. 폴더는 확인 창에
   원장 기준 전체 파일 수·크기를 보여 주고, git 저장소가 걸려 있으면 폴더 이름을 입력해야 지워진다.
@@ -72,6 +75,21 @@ fsledger hub --open          # 파일로만 열기: ~/.fsledger/hub.html (scan·
 `fsledger serve`는 127.0.0.1 에서만 열리고, 실행할 때마다 새 토큰이 들어간 주소를 출력한다. 토큰과 Host
 헤더가 맞지 않는 요청, 원장에 없는 경로나 문서·데이터가 아닌 파일 요청은 거부한다. `file://`로 연
 페이지는 브라우저가 다른 파일 읽기를 막기 때문에 미리보기가 꺼진다.
+
+한글·mermaid·Excalidraw는 브라우저에서 오픈소스 라이브러리로 그린다. 처음 열 때 jsDelivr에서
+버전을 고정한 파일을 받고 무결성 해시(SRI)로 확인하므로 인터넷이 필요하다. 그리는 화면은
+`sandbox="allow-scripts"` iframe이라 출처가 없어서, 허브 토큰이나 서버 API에 닿지 못한다.
+
+| 형식 | 라이브러리 |
+|---|---|
+| HWP·HWPX | [rhwp](https://github.com/edwardkim/rhwp) `@rhwp/core@0.8.7` (MIT) |
+| mermaid | `mermaid@11.4.1` (MIT), `securityLevel: "strict"` |
+| Excalidraw | `@excalidraw/utils@0.1.2` (MIT) |
+
+한글 편집기(`@rhwp/editor@0.8.7`)는 편집 화면을 rhwp 개발자 사이트(edwardkim.github.io/rhwp)에서 불러온다.
+문서는 그 iframe으로 postMessage만 하고 서버로 올라가지 않지만, 그 화면 코드는 버전을 고정할 수 없다.
+그래서 기본으로 꺼 두었고, 켜도 처음 열 때 한 번 더 확인한다. 고객 문서를 다룬다면 rhwp-studio를 직접 빌드해
+쓰는 편이 안전하다.
 
 - 종류: 문서(pdf·docx·hwp…), 발표, 스프레드시트, 노트(md·txt), 데이터(csv·parquet·jsonl…),
   노트북, 다이어그램. 저장소 안의 `.txt`·`.json`은 설정 파일이 대부분이라 뺀다.
@@ -131,6 +149,7 @@ fsledger schedule remove
 roots = ["~/Desktop", "~/Documents", "~/Downloads"]
 dupe_min_size = 1024
 organize_min_age_days = 2
+hwp_editor = false          # true 면 허브에서 한글 편집 (위 설명 참고)
 
 [[organize]]
 path = "~/Downloads"

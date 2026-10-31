@@ -273,3 +273,63 @@ class TestTrashFolder:
         undo = json.dumps({"batch": json.loads(raw2)["batch"]}).encode()
         assert _req(app, "POST", "/api/undo", tok, undo)[0] == 200
         assert (root / "proj" / "x.md").read_bytes() == b"# x"
+
+
+class TestDiagramsAndHwp:
+    """다이어그램·한글 미리보기 형식과 한글 저장(원본 백업·되돌리기)."""
+
+    def test_preview_types(self, tmp_path: Path) -> None:
+        # Given
+        mmd = _write(tmp_path / "a.mmd", b"graph LR\n A-->B\n")
+        exc = _write(tmp_path / "b.excalidraw", json.dumps({"elements": []}).encode())
+        bad = _write(tmp_path / "c.excalidraw", b'{"x": 1}')
+        hwp = _write(tmp_path / "d.hwp", server._MAGIC[".hwp"] + b"\0" * 8)
+
+        # When / Then
+        assert preview.preview(mmd) == {
+            "type": "mermaid",
+            "text": "graph LR\n A-->B\n",
+            "truncated": False,
+        }
+        assert preview.preview(exc)["type"] == "excalidraw"
+        assert preview.preview(bad)["type"] == "error"
+        assert preview.preview(hwp) == {"type": "hwp"}
+
+    def test_save_and_undo(self, env: tuple) -> None:
+        # Given: 편집기를 켠 서버
+        cfg, conn, root = env
+        original = server._MAGIC[".hwp"] + b"original"
+        target = _write(root / "doc.hwp", original)
+        run_scan(conn, cfg)
+        cfg.hwp_editor = True
+        httpd, app = server.make_server(cfg, 0)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        tok = {"X-Fsledger-Token": app.token}
+        where = {"X-Fsledger-Path": urllib.parse.quote(str(target))}
+        try:
+            # When: 미리보기 → 원본 내려받기 → 저장
+            status, raw = _req(
+                app, "GET", "/api/preview?path=" + urllib.parse.quote(str(target)), tok
+            )
+            assert json.loads(raw) == {"type": "hwp", "editable": True}
+            q = f"/api/raw?path={urllib.parse.quote(str(target))}&t={app.token}"
+            assert _req(app, "GET", q)[1] == original
+            edited = server._MAGIC[".hwp"] + b"edited"
+            assert _req(app, "POST", "/api/save", {**tok, **where}, b"PK\x03\x04zip")[0] == 400
+            status, raw = _req(app, "POST", "/api/save", {**tok, **where}, edited)
+
+            # Then: 새 내용이 제자리에, 원본은 격리 폴더에
+            assert status == 200 and target.read_bytes() == edited
+            batch = json.loads(raw)["batch"]
+            assert list((cfg.quarantine_dir / batch).rglob("doc.hwp"))[0].read_bytes() == original
+            undo = json.dumps({"batch": batch}).encode()
+            assert _req(app, "POST", "/api/undo-save", tok, undo)[0] == 200
+            assert target.read_bytes() == original
+            assert _req(app, "POST", "/api/undo-save", tok, undo)[0] == 404
+
+            # 편집기를 끄면 저장 자체가 거부된다
+            cfg.hwp_editor = False
+            assert _req(app, "POST", "/api/save", {**tok, **where}, edited)[0] == 403
+        finally:
+            httpd.shutdown()
+            httpd.server_close()

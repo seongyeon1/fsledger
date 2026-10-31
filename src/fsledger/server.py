@@ -16,13 +16,16 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Set, Tuple
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from fsledger import hub, ops, page, preview
 from fsledger.config import Config
 from fsledger.db import connect
 
 _CHUNK = 1024 * 1024
+MAX_SAVE = 200 * 1024 * 1024
+# 저장할 바이트가 정말 그 형식인지 첫 바이트로 확인한다 (HWP 는 OLE 복합 파일, HWPX 는 zip).
+_MAGIC = {".hwp": b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", ".hwpx": b"PK\x03\x04"}
 
 
 def resolve_allowed(conn: sqlite3.Connection, cfg: Config, raw: str) -> Optional[Path]:
@@ -86,6 +89,16 @@ def folder_info(conn: sqlite3.Connection, raw: str) -> Dict[str, Any]:
     return {"files": files, "bytes": size + junk, "repos": sorted(repos)[:20]}
 
 
+def _write_atomic(path: Path, data: bytes) -> None:
+    """같은 폴더의 임시 파일에 쓴 뒤 바꿔치기해서, 중간에 끊겨도 반쪽 파일이 남지 않게 한다."""
+    tmp = path.with_name(f".{path.name}.fsledger-tmp")
+    with tmp.open("xb") as f:
+        f.write(data)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
 class HubApp:
     """서버 상태: 설정, 토큰, 마지막으로 만든 페이지."""
 
@@ -97,6 +110,7 @@ class HubApp:
         self._html: Optional[str] = None
         self._snapshot: Optional[int] = None
         self.batches: Set[str] = set()  # 이 서버에서 만든 삭제 배치만 되돌릴 수 있다
+        self.saves: Dict[str, str] = {}  # 저장 배치 → 저장한 파일 경로
 
     def conn(self) -> sqlite3.Connection:
         """요청마다 새 연결 (sqlite 연결은 스레드끼리 나눠 쓰지 않는다)."""
@@ -185,7 +199,10 @@ def make_handler(app: HubApp) -> type:
                 path = self._file(q)
                 if path is None:
                     return self._deny(HTTPStatus.NOT_FOUND)
-                return self._json(HTTPStatus.OK, preview.preview(path))
+                data = preview.preview(path)
+                if data.get("type") == "hwp":
+                    data["editable"] = app.cfg.hwp_editor
+                return self._json(HTTPStatus.OK, data)
             if route == "/api/folder":
                 if not self._token_ok(self.headers.get("X-Fsledger-Token")):
                     return self._deny()
@@ -198,11 +215,11 @@ def make_handler(app: HubApp) -> type:
                 finally:
                     conn.close()
             if route == "/api/raw":
-                # iframe 은 헤더를 못 붙이므로 토큰을 쿼리로 받는다. PDF 만 내보낸다.
+                # iframe 은 헤더를 못 붙이므로 토큰을 쿼리로 받는다. PDF·한글만 내보낸다.
                 if not self._token_ok(q.get("t")):
                     return self._deny()
                 path = self._file(q)
-                mime = preview.INLINE_EXTS.get(path.suffix.lower(), "") if path else ""
+                mime = preview.RAW_EXTS.get(path.suffix.lower(), "") if path else ""
                 if path is None or not mime:
                     return self._deny(HTTPStatus.NOT_FOUND)
                 return self._stream(path, mime)
@@ -212,6 +229,8 @@ def make_handler(app: HubApp) -> type:
             if not self._host_ok() or not self._token_ok(self.headers.get("X-Fsledger-Token")):
                 return self._deny()
             route, _ = self._query()
+            if route == "/api/save":
+                return self._save()
             length = min(int(self.headers.get("Content-Length", "0") or 0), 64 * 1024)
             try:
                 body = json.loads(self.rfile.read(length) or b"{}")
@@ -227,6 +246,8 @@ def make_handler(app: HubApp) -> type:
                 return self._trash_folder(body)
             if route == "/api/undo":
                 return self._undo(body)
+            if route == "/api/undo-save":
+                return self._undo_save(body)
             return self._deny(HTTPStatus.NOT_FOUND)
 
         def _open(self, body: Dict[str, Any]) -> None:
@@ -287,6 +308,74 @@ def make_handler(app: HubApp) -> type:
                     {"error": "되돌리지 못했습니다. 원래 자리에 같은 이름의 파일이 있습니다"},
                 )
             app.batches.discard(batch)
+            return self._json(HTTPStatus.OK, {"ok": True})
+
+        def _save(self) -> None:
+            # 한글 편집기에서 저장. 원본은 격리 폴더로 옮겨 두고 새 내용을 그 자리에 쓴다.
+            if not app.cfg.hwp_editor:
+                return self._deny()
+            raw_path = unquote(self.headers.get("X-Fsledger-Path", ""))
+            path = self._file({"path": raw_path})
+            if path is None or path.suffix.lower() not in _MAGIC:
+                return self._deny(HTTPStatus.NOT_FOUND)
+            as_hwp = self.headers.get("X-Fsledger-Save-As") == "hwp"
+            fmt = ".hwp" if as_hwp else path.suffix.lower()
+            length = int(self.headers.get("Content-Length", "0") or 0)
+            if not 0 < length <= MAX_SAVE:
+                return self._deny(HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+            data = self.rfile.read(length)
+            if len(data) != length or not data.startswith(_MAGIC[fmt]):
+                return self._deny(HTTPStatus.BAD_REQUEST)
+            if as_hwp:
+                # HWPX 원본은 건드리지 않고 옆에 .hwp 로 새로 만든다.
+                target = Path(ops.unique_dst(str(path.with_suffix(".hwp"))))
+                _write_atomic(target, data)
+                return self._json(HTTPStatus.OK, {"ok": True, "path": str(target)})
+            batch = ops.new_batch_id("clean")
+            src = str(path)
+            move = ops.Move(
+                "quarantine", src, ops.quarantine_target(app.cfg, batch, src), "편집 전 원본"
+            )
+            conn = app.conn()
+            try:
+                if ops.apply(conn, [move], batch).done != 1:
+                    return self._json(HTTPStatus.CONFLICT, {"error": "원본을 백업하지 못했습니다"})
+                try:
+                    _write_atomic(path, data)
+                except OSError:
+                    ops.undo(conn, app.cfg, batch)
+                    raise
+            finally:
+                conn.close()
+            app.saves[batch] = src
+            return self._json(HTTPStatus.OK, {"ok": True, "batch": batch})
+
+        def _undo_save(self, body: Dict[str, Any]) -> None:
+            # 편집본도 지우지 않고 격리한 다음 원본을 제자리로 돌린다.
+            batch = str(body.get("batch", ""))
+            src = app.saves.get(batch)
+            if src is None:
+                return self._deny(HTTPStatus.NOT_FOUND)
+            aside = ops.new_batch_id("clean")
+            conn = app.conn()
+            try:
+                if os.path.lexists(src):
+                    move = ops.Move(
+                        "quarantine",
+                        src,
+                        ops.quarantine_target(app.cfg, aside, src),
+                        "되돌리기 전 편집본",
+                    )
+                    if ops.apply(conn, [move], aside).done != 1:
+                        return self._json(
+                            HTTPStatus.CONFLICT, {"error": "편집본을 옮기지 못했습니다"}
+                        )
+                res = ops.undo(conn, app.cfg, batch)
+            finally:
+                conn.close()
+            if res.done != 1:
+                return self._json(HTTPStatus.CONFLICT, {"error": "원본을 되돌리지 못했습니다"})
+            del app.saves[batch]
             return self._json(HTTPStatus.OK, {"ok": True})
 
         def _stream(self, path: Path, mime: str) -> None:
