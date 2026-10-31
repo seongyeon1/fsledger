@@ -12,6 +12,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -21,6 +22,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 from fsledger import hub, ops, page, preview
 from fsledger.config import Config
 from fsledger.db import connect
+from fsledger.scan import run_scan
 
 _CHUNK = 1024 * 1024
 MAX_SAVE = 200 * 1024 * 1024
@@ -100,7 +102,7 @@ def _write_atomic(path: Path, data: bytes) -> None:
 
 
 class HubApp:
-    """서버 상태: 설정, 토큰, 마지막으로 만든 페이지."""
+    """서버 상태: 설정, 토큰, 마지막으로 만든 페이지, 백그라운드 스캔."""
 
     def __init__(self, cfg: Config, port: int) -> None:
         self.cfg = cfg
@@ -111,6 +113,10 @@ class HubApp:
         self._snapshot: Optional[int] = None
         self.batches: Set[str] = set()  # 이 서버에서 만든 삭제 배치만 되돌릴 수 있다
         self.saves: Dict[str, str] = {}  # 저장 배치 → 저장한 파일 경로
+        self._scan_lock = threading.Lock()
+        self._scan_again = False  # 스캔 중에 들어온 요청은 끝난 뒤 한 번 더 돈다
+        self.scanning = False
+        self.scan_error: Optional[str] = None
 
     def conn(self) -> sqlite3.Connection:
         """요청마다 새 연결 (sqlite 연결은 스레드끼리 나눠 쓰지 않는다)."""
@@ -120,7 +126,7 @@ class HubApp:
         """스냅샷이 바뀌었을 때만 허브 페이지를 다시 만든다."""
         conn = self.conn()
         try:
-            snap = conn.execute("SELECT MAX(id) FROM snapshots").fetchone()[0]
+            snap = hub.content_version(conn)
             with self._lock:
                 if self._html is None or snap != self._snapshot:
                     self._html = page.build("hub.html", hub.build_data(conn, self.cfg))
@@ -128,6 +134,63 @@ class HubApp:
                 return self._html
         finally:
             conn.close()
+
+    def state(self) -> Dict[str, Any]:
+        """허브가 새 내용을 가져올지 판단할 상태."""
+        conn = self.conn()
+        try:
+            last = conn.execute("SELECT MAX(finished_at) FROM snapshots").fetchone()[0]
+            version = hub.content_version(conn)
+        finally:
+            conn.close()
+        return {
+            "version": version,
+            "scanned_at": last,
+            "scanning": self.scanning,
+            "error": self.scan_error,
+        }
+
+    def sync(self) -> None:
+        """백그라운드에서 다시 스캔한다. 이미 도는 중이면 끝난 뒤 한 번 더 돈다."""
+        with self._scan_lock:
+            if self.scanning:
+                self._scan_again = True
+                return
+            self.scanning = True
+        threading.Thread(target=self._scan_loop, name="fsledger-scan", daemon=True).start()
+
+    def _scan_loop(self) -> None:
+        while True:
+            try:
+                conn = self.conn()
+                try:
+                    run_scan(conn, self.cfg)
+                finally:
+                    conn.close()
+                self.scan_error = None
+            except Exception as exc:  # noqa: BLE001 — 스캔이 실패해도 서버는 계속 돈다
+                self.scan_error = str(exc) or type(exc).__name__
+                print(f"스캔 실패: {self.scan_error}", file=sys.stderr, flush=True)
+            with self._scan_lock:
+                if not self._scan_again:
+                    self.scanning = False
+                    return
+                self._scan_again = False
+
+    def start_auto_sync(self, stop: threading.Event) -> None:
+        """rescan_minutes 마다 다시 스캔한다. 마지막 스캔이 그보다 오래됐으면 바로 한 번 돈다."""
+        interval = self.cfg.rescan_minutes * 60
+        if interval <= 0:
+            return
+
+        def loop() -> None:
+            last = self.state()["scanned_at"] or 0
+            if time.time() - last >= interval:
+                self.sync()
+            while not stop.wait(interval):
+                self.sync()
+
+        threading.Thread(target=loop, name="fsledger-auto-sync", daemon=True).start()
 
     def url(self) -> str:
         """브라우저로 열 주소."""
@@ -193,6 +256,10 @@ def make_handler(app: HubApp) -> type:
                     )
                 html = app.page_html().encode()
                 return self._send(HTTPStatus.OK, html, "text/html; charset=utf-8")
+            if route == "/api/state":
+                if not self._token_ok(self.headers.get("X-Fsledger-Token")):
+                    return self._deny()
+                return self._json(HTTPStatus.OK, app.state())
             if route == "/api/preview":
                 if not self._token_ok(self.headers.get("X-Fsledger-Token")):
                     return self._deny()
@@ -238,6 +305,9 @@ def make_handler(app: HubApp) -> type:
                 return self._deny(HTTPStatus.BAD_REQUEST)
             if not isinstance(body, dict):
                 return self._deny(HTTPStatus.BAD_REQUEST)
+            if route == "/api/sync":
+                app.sync()
+                return self._json(HTTPStatus.OK, {"ok": True})
             if route == "/api/open":
                 return self._open(body)
             if route == "/api/trash":
@@ -291,6 +361,7 @@ def make_handler(app: HubApp) -> type:
                     {"error": "옮기지 못했습니다. 파일이 열려 있는지 확인하세요"},
                 )
             app.batches.add(batch)
+            app.sync()
             return self._json(HTTPStatus.OK, {"ok": True, "batch": batch})
 
         def _undo(self, body: Dict[str, Any]) -> None:
@@ -308,6 +379,7 @@ def make_handler(app: HubApp) -> type:
                     {"error": "되돌리지 못했습니다. 원래 자리에 같은 이름의 파일이 있습니다"},
                 )
             app.batches.discard(batch)
+            app.sync()
             return self._json(HTTPStatus.OK, {"ok": True})
 
         def _save(self) -> None:
@@ -330,6 +402,7 @@ def make_handler(app: HubApp) -> type:
                 # HWPX 원본은 건드리지 않고 옆에 .hwp 로 새로 만든다.
                 target = Path(ops.unique_dst(str(path.with_suffix(".hwp"))))
                 _write_atomic(target, data)
+                app.sync()
                 return self._json(HTTPStatus.OK, {"ok": True, "path": str(target)})
             batch = ops.new_batch_id("clean")
             src = str(path)
@@ -348,6 +421,7 @@ def make_handler(app: HubApp) -> type:
             finally:
                 conn.close()
             app.saves[batch] = src
+            app.sync()
             return self._json(HTTPStatus.OK, {"ok": True, "batch": batch})
 
         def _undo_save(self, body: Dict[str, Any]) -> None:
@@ -376,6 +450,7 @@ def make_handler(app: HubApp) -> type:
             if res.done != 1:
                 return self._json(HTTPStatus.CONFLICT, {"error": "원본을 되돌리지 못했습니다"})
             del app.saves[batch]
+            app.sync()
             return self._json(HTTPStatus.OK, {"ok": True})
 
         def _stream(self, path: Path, mime: str) -> None:
@@ -409,6 +484,8 @@ def make_server(cfg: Config, port: int) -> Tuple[ThreadingHTTPServer, HubApp]:
 def serve(cfg: Config, port: int, on_ready: Optional[Callable[[HubApp], None]] = None) -> None:
     """서버를 띄우고 Ctrl+C 까지 기다린다."""
     httpd, app = make_server(cfg, port)
+    stop = threading.Event()
+    app.start_auto_sync(stop)
     if on_ready is not None:
         on_ready(app)
     try:
@@ -416,4 +493,5 @@ def serve(cfg: Config, port: int, on_ready: Optional[Callable[[HubApp], None]] =
     except KeyboardInterrupt:
         pass
     finally:
+        stop.set()
         httpd.server_close()

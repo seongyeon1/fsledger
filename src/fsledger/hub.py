@@ -112,6 +112,14 @@ def project_of(
     return f"{root_label(root)}/{head}", f"{root}/{head}", False
 
 
+def content_version(conn: sqlite3.Connection) -> int:
+    """내용이 바뀐 마지막 스냅샷 id. 변경 없는 스캔은 허브를 다시 그릴 이유가 없다."""
+    row = conn.execute(
+        "SELECT MAX(id) FROM snapshots WHERE added + modified + deleted + moved > 0"
+    ).fetchone()
+    return int(row[0] or 0)
+
+
 def build_data(conn: sqlite3.Connection, cfg: Config) -> Dict[str, Any]:
     """허브 페이지가 쓰는 JSON 을 만든다.
 
@@ -152,6 +160,7 @@ def build_data(conn: sqlite3.Connection, cfg: Config) -> Dict[str, Any]:
         p["n"] = counts[i]
     return {
         "generated_at": time.time(),
+        "version": content_version(conn),
         "home": str(Path.home()),
         "roots": [{"path": r, "label": root_label(r)} for r in sorted(roots)],
         "kinds": kinds,

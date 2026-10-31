@@ -15,6 +15,10 @@
 .wrap { max-width: 1280px; margin: 0 auto; padding: 0 var(--s-200); }
 header.top { padding-top: var(--s-600); display: flex; gap: var(--s-200); align-items: flex-start; }
 header.top .text { flex: 1; min-width: 0; }
+header.top .acts-top { display: flex; gap: var(--s-75); }
+#sync[hidden] { display: none; }
+#sync.spinning .icon { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .meta-line { margin-top: var(--s-75); color: var(--text-muted); }
 .mode { margin-top: var(--s-100); display: flex; gap: var(--s-75); align-items: center; color: var(--text-secondary); }
 .kpis { margin-top: var(--s-300); }
@@ -237,6 +241,7 @@ dialog.confirm .row { display: flex; gap: var(--s-75); justify-content: flex-end
   .skeleton i { animation: none; }
   .node .caret .icon { transition: none; }
   .toast, .toast.show { transform: translate(-50%, 0); }
+  #sync.spinning .icon { animation: none; }
 }
 </style>
 <script type="importmap">{"imports": {"rhwp-editor": "https://cdn.jsdelivr.net/npm/@rhwp/editor@0.8.7/index.js"}, "integrity": {"https://cdn.jsdelivr.net/npm/@rhwp/editor@0.8.7/index.js": "sha384-fAIxftkS6MzZSdw9gNsRZYzcUzOhsQVxMb6zYG+2l22oRTDRLUBlG9lYZjT2ZB5+", "https://cdn.jsdelivr.net/npm/@rhwp/editor@0.8.7/transport.js": "sha384-44rz3WYrQWNdA7vj7dzgVnDDsk4ITWDO4RvLV4DI7fnHZbylY2gtL4Nx2kGrykxQ", "https://cdn.jsdelivr.net/npm/@rhwp/editor@0.8.7/document-agent-contract.js": "sha384-Kg7dJ++E/ovUeGH5Dgj4NpoHhTqddYqyghe2BIO3ISAHtXQfdS98SBPdvRFQUggd"}}</script>
@@ -251,7 +256,10 @@ dialog.confirm .row { display: flex; gap: var(--s-75); justify-content: flex-end
       <p class="meta-line caption-5" id="meta"></p>
       <p class="mode caption-2" id="mode"></p>
     </div>
-    <button class="btn button-sm" type="button" id="theme" aria-label="테마 바꾸기"></button>
+    <div class="acts-top">
+      <button class="btn button-sm" type="button" id="sync" title="지금 다시 스캔해 목록을 최신으로 맞춥니다" hidden></button>
+      <button class="btn button-sm" type="button" id="theme" aria-label="테마 바꾸기"></button>
+    </div>
   </header>
   <div class="kpis" id="kpis"></div>
 
@@ -498,12 +506,16 @@ function filtered({ useDir = true } = {}) {
 const folderMode = () => !!state.dir && !state.q;
 
 // ---- 머리말 --------------------------------------------------------------
+let lastScan = DATA.generated_at;
+function renderMeta() {
+  const at = new Date(lastScan * 1000).toLocaleString("ko-KR");
+  $("meta").textContent = `${at} 확인 · ` + DATA.roots.map((r) => r.label).join(", ");
+}
 function renderHeader() {
   const vis = ROWS.filter((r) => !r.hidden);
   const recent = vis.filter((r) => NOW - r.mtime < 7 * 86400).length;
   const cloud = vis.filter((r) => r.cloud).length;
-  const gen = new Date(DATA.generated_at * 1000).toLocaleString("ko-KR");
-  $("meta").textContent = `${gen} 갱신 · ` + DATA.roots.map((r) => r.label).join(", ");
+  renderMeta();
   $("mode").replaceChildren(icon(SERVED ? "eye" : "warning"), SERVED
     ? "미리보기와 앱에서 열기를 쓸 수 있습니다."
     : "파일로 연 페이지라 미리보기가 꺼져 있습니다. 터미널에서 fsledger serve 로 열면 켜집니다.");
@@ -661,7 +673,7 @@ function whereCell(r) {
 async function api(path, opts = {}) {
   const res = await fetch(path, { ...opts, headers: { "X-Fsledger-Token": TOKEN, ...(opts.headers || {}) } });
   if (!res.ok) {
-    let msg = res.status === 404 ? "이 파일은 열 수 없습니다. 다시 스캔한 뒤 시도하세요" : `서버 오류 (${res.status})`;
+    let msg = res.status === 404 ? "이 파일은 열 수 없습니다. 동기화한 뒤 다시 시도하세요" : `서버 오류 (${res.status})`;
     if (res.status !== 404) { try { msg = (await res.json()).error || msg; } catch (e) {} }
     throw new Error(msg);
   }
@@ -1334,11 +1346,61 @@ function reveal(nodes) {
   nodes.forEach((n) => { n.classList.add("reveal"); io.observe(n); });
 }
 
+// ---- 동기화 --------------------------------------------------------------
+// 서버가 다시 스캔해 내용이 바뀌면 새로 불러온다. 보던 위치는 주소의 # 에 있어 그대로 남는다.
+const SCROLL_KEY = "fsledger.syncScroll";
+let syncWanted = false, syncTimer = 0;
+const busy = () => !!state.view || !$("editor").hidden || $("confirm").open ||
+  document.activeElement === $("q");
+function paintSync(scanning) {
+  const b = $("sync");
+  b.disabled = scanning; b.classList.toggle("spinning", scanning);
+  b.replaceChildren(icon("arrows-clockwise"), scanning ? " 확인 중…" : " 동기화");
+}
+async function pollSync() {
+  clearTimeout(syncTimer);
+  let st = null;
+  try { st = await api("/api/state"); } catch (e) {}
+  if (st) {
+    paintSync(st.scanning);
+    if (st.scanned_at) { lastScan = st.scanned_at; renderMeta(); }
+    if (st.version !== DATA.version) {
+      if (!busy()) {
+        try { sessionStorage.setItem(SCROLL_KEY, String(scrollY)); } catch (e) {}
+        location.reload();
+        return;
+      }
+    } else if (syncWanted && !st.scanning) {
+      syncWanted = false;
+      toast(st.error ? "동기화하지 못했습니다: " + st.error : "이미 최신 상태입니다.");
+    }
+  }
+  // 스캔 중이거나 반영을 기다릴 때만 자주 묻는다.
+  const waiting = st && (st.scanning || st.version !== DATA.version);
+  syncTimer = setTimeout(pollSync, waiting ? 2000 : 30000);
+}
+if (SERVED) {
+  $("sync").hidden = false;
+  paintSync(false);
+  $("sync").onclick = async () => {
+    syncWanted = true; paintSync(true);
+    try { await api("/api/sync", { method: "POST" }); } catch (e) { syncWanted = false; toast(e.message); }
+    pollSync();
+  };
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) pollSync(); });
+  syncTimer = setTimeout(pollSync, 2000);
+}
+
 if (!history.state) history.replaceState({ depth: 0 }, "");
 fromHash();
 syncControls();
 renderHeader();
 render();
+try {
+  const y = Number(sessionStorage.getItem(SCROLL_KEY));
+  sessionStorage.removeItem(SCROLL_KEY);
+  if (y) requestAnimationFrame(() => scrollTo(0, y));
+} catch (e) {}
 reveal([...document.querySelectorAll(".kpi, .layout > *")]);
 </script>
 </body>

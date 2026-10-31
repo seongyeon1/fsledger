@@ -127,6 +127,73 @@ class TestServer:
         assert _req(app, "POST", "/api/open", {"X-Fsledger-Token": app.token}, other)[0] == 404
 
 
+def _wait_scan(app: server.HubApp) -> Dict[str, Any]:
+    for _ in range(200):
+        status, body = _req(app, "GET", "/api/state", {"X-Fsledger-Token": app.token})
+        st: Dict[str, Any] = json.loads(body)
+        if status == 200 and not st["scanning"]:
+            return st
+        threading.Event().wait(0.05)
+    raise AssertionError("스캔이 끝나지 않았습니다")
+
+
+class TestSync:
+    """동기화 버튼과 자동 스캔: 새 파일이 바로 허브에 들어온다."""
+
+    def test_sync_picks_up_new_file(self, running: tuple) -> None:
+        app, root = running
+        assert _req(app, "GET", "/api/state")[0] == 403
+        assert _req(app, "POST", "/api/sync")[0] == 403
+        before = _wait_scan(app)["version"]
+        _write(root / "new.md", b"# fresh")
+        q = f"/api/preview?path={root}/new.md"
+        assert _req(app, "GET", q, {"X-Fsledger-Token": app.token})[0] == 404
+
+        assert _req(app, "POST", "/api/sync", {"X-Fsledger-Token": app.token})[0] == 200
+        st = _wait_scan(app)
+        assert st["version"] > before and st["error"] is None
+        assert _req(app, "GET", q, {"X-Fsledger-Token": app.token})[0] == 200
+        assert b'"new.md"' in _req(app, "GET", f"/?t={app.token}")[1]
+
+    def test_unchanged_scan_keeps_version(self, running: tuple) -> None:
+        app, _ = running
+        before = _wait_scan(app)["version"]
+        app.sync()
+        assert _wait_scan(app)["version"] == before  # 변경 없는 스캔으로 화면을 새로 고치지 않는다
+
+    def test_trash_syncs(self, running: tuple) -> None:
+        app, root = running
+        before = _wait_scan(app)["version"]
+        body = json.dumps({"path": f"{root}/a.md"}).encode()
+        assert _req(app, "POST", "/api/trash", {"X-Fsledger-Token": app.token}, body)[0] == 200
+        assert _wait_scan(app)["version"] > before
+
+    def test_concurrent_scans_serialize(self, env: tuple) -> None:
+        cfg, conn, root = env
+        for i in range(50):
+            _write(root / f"d/{i}.md", b"x" * i)
+        errors: list = []
+
+        def scan() -> None:
+            c = connect(cfg.db_path)
+            try:
+                run_scan(c, cfg)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+            finally:
+                c.close()
+
+        threads = [threading.Thread(target=scan) for _ in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert not errors
+        current = conn.execute("SELECT COUNT(*) FROM file_versions WHERE valid_to IS NULL")
+        added = conn.execute("SELECT COUNT(*) FROM changes WHERE kind = 'added'")
+        assert current.fetchone()[0] == 50 and added.fetchone()[0] == 50
+
+
 class TestPreview:
     """종류별 미리보기."""
 

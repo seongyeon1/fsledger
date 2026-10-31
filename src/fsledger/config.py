@@ -91,6 +91,8 @@ class Config:
     organize_min_age_days: int = 2
     # 한글 편집기는 외부(rhwp-studio) 화면을 불러오므로 직접 켜야 한다.
     hwp_editor: bool = False
+    # serve 가 켜져 있는 동안 몇 분마다 다시 스캔할지. 0 이면 끈다 (동기화 버튼은 그대로 된다).
+    rescan_minutes: int = 15
     organize_roots: List[OrganizeRoot] = field(
         default_factory=lambda: [
             OrganizeRoot(HOME / "Downloads", group_by_month=True, auto=True),
@@ -142,6 +144,7 @@ def load_config(path: Optional[Path] = None) -> Config:
     cfg.dupe_min_size = int(raw.get("dupe_min_size", cfg.dupe_min_size))
     cfg.organize_min_age_days = int(raw.get("organize_min_age_days", cfg.organize_min_age_days))
     cfg.hwp_editor = bool(raw.get("hwp_editor", cfg.hwp_editor))
+    cfg.rescan_minutes = max(int(raw.get("rescan_minutes", cfg.rescan_minutes)), 0)
     if "organize" in raw:
         cfg.organize_roots = [
             OrganizeRoot(

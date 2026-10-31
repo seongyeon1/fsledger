@@ -179,8 +179,6 @@ def run_scan(
     """스캔 1회를 실행해 스냅샷·버전·변경 이벤트를 하나의 트랜잭션으로 기록한다."""
     t0 = time.time()
     started_ns = time.time_ns()
-    parent = conn.execute("SELECT MAX(id) FROM snapshots").fetchone()[0]
-    prev = _load_current(conn)
 
     errors: List[str] = []
     repos: Set[str] = set()
@@ -194,6 +192,9 @@ def run_scan(
 
     conn.execute("BEGIN IMMEDIATE")
     try:
+        # 이전 상태는 쓰기 잠금을 잡은 뒤 읽는다. 다른 스캔이 먼저 끝났어도 그 결과 위에 쌓인다.
+        parent = conn.execute("SELECT MAX(id) FROM snapshots").fetchone()[0]
+        prev = _load_current(conn)
         cur = conn.execute(
             "INSERT INTO snapshots (parent_id, started_at, roots) VALUES (?, ?, ?)",
             (parent, t0, json.dumps([str(r) for r in cfg.roots], ensure_ascii=False)),
