@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.claude/.bc-*.json
+.claude/.bc-explain/
+.venv-py314/
+PLANNING/
+.sy-memory/
+.venv-ci-*/
