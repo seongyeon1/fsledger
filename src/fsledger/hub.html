@@ -188,6 +188,14 @@ dialog.confirm { border: 1px solid var(--line); border-radius: var(--r-2xl); pad
 dialog.confirm::backdrop { background: rgb(0 0 0 / 0.4); }
 dialog.confirm p + p { margin-top: var(--s-75); color: var(--text-secondary); }
 dialog.confirm .name { word-break: break-all; }
+dialog.confirm .c-warn { margin-top: var(--s-200); }
+dialog.confirm .c-warn[hidden], dialog.confirm .c-type[hidden] { display: none; }
+dialog.confirm .c-type { display: flex; flex-direction: column; gap: var(--s-75); margin-top: var(--s-200); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.crumbs .del { margin-left: auto; }
+tr.folder .row-del { opacity: 0; transition: opacity 300ms var(--ease); }
+tr.folder:hover .row-del, tr.folder .row-del:focus-visible { opacity: 1; }
+@media (hover: none) { tr.folder .row-del { opacity: 1; } }
 dialog.confirm .row { display: flex; gap: var(--s-75); justify-content: flex-end; margin-top: var(--s-300); }
 .btn.solid-danger { background: var(--danger); border-color: var(--danger); color: #fff; }
 .btn.solid-danger:hover { background: var(--danger); border-color: var(--danger); opacity: 0.9; }
@@ -282,6 +290,7 @@ dialog.confirm .row { display: flex; gap: var(--s-75); justify-content: flex-end
           <button class="icon-btn" type="button" id="up" aria-label="상위 폴더" title="상위 폴더"></button>
         </div>
         <div class="trail" id="trail"></div>
+        <button class="link-btn danger del caption-2" type="button" id="del-folder" hidden></button>
       </nav>
       <div class="summary caption-2" id="summary"></div>
       <table>
@@ -312,10 +321,14 @@ dialog.confirm .row { display: flex; gap: var(--s-75); justify-content: flex-end
 </section>
 
 <dialog class="confirm" id="confirm" aria-labelledby="c-title">
-  <h2 class="title-2" id="c-title">이 파일을 삭제할까요?</h2>
+  <h2 class="title-2" id="c-title"></h2>
   <p class="body-6 name" id="c-name"></p>
-  <p class="caption-2">바로 지우지 않고 격리 폴더(~/.fsledger/quarantine)로 옮깁니다. 알림의 되돌리기나
-    fsledger undo 로 복구할 수 있고, fsledger purge 를 실행하기 전까지 남아 있습니다.</p>
+  <p class="caption-2" id="c-detail"></p>
+  <div class="notice caption-2 c-warn" id="c-warn" hidden><span class="icon" data-icon="warning"></span><p id="c-warn-text"></p></div>
+  <label class="c-type" id="c-type-wrap" hidden>
+    <span class="caption-2">확인하려면 폴더 이름 <b id="c-type-name"></b> 을(를) 입력하세요</span>
+    <span class="field body-6"><input id="c-type" autocomplete="off" spellcheck="false"></span>
+  </label>
   <div class="row">
     <button class="btn button-sm" type="button" id="c-cancel">취소</button>
     <button class="btn button-sm solid-danger" type="button" id="c-ok"></button>
@@ -571,6 +584,7 @@ $("pq").addEventListener("input", renderProjects);
 
 // ---- 위치 표시 (breadcrumb) ----------------------------------------------
 function renderCrumbs() {
+  $("del-folder").hidden = !(SERVED && state.dir && !ROOT_LABEL.has(state.dir));
   $("back").disabled = !((history.state && history.state.depth) > 0);
   $("up").disabled = !state.dir;
   const trail = $("trail");
@@ -706,6 +720,12 @@ function folderRow(path, count) {
     el("td", { className: "c-where caption-5", textContent: "폴더" }),
     el("td", { className: "num caption-5", textContent: `${count.toLocaleString()}개` }),
     el("td", { className: "num c-size" }));
+  if (SERVED) {
+    const del = el("button", { className: "link-btn danger row-del", type: "button", title: "폴더 삭제" }, icon("trash"));
+    del.setAttribute("aria-label", `${labelOf(path)} 폴더 삭제`);
+    del.onclick = (e) => { e.stopPropagation(); confirmDeleteFolder(path, del); };
+    tr.lastChild.append(del);
+  }
   tr.onclick = () => { expanded.add(path); navigate({ dir: path }); };
   return tr;
 }
@@ -947,46 +967,79 @@ document.addEventListener("keydown", (e) => {
 // ---- 삭제 (격리 폴더로 옮기기) ---------------------------------------------
 const dialog = $("confirm");
 $("c-ok").append(icon("trash"), "격리 폴더로 옮기기");
+$("del-folder").append(icon("trash"), "이 폴더 삭제");
+$("del-folder").onclick = () => confirmDeleteFolder(state.dir, $("del-folder"));
+const QUARANTINE_NOTE = "바로 지우지 않고 격리 폴더(~/.fsledger/quarantine)로 옮깁니다. 알림의 되돌리기나 fsledger undo 로 복구할 수 있고, fsledger purge 를 실행하기 전까지 남아 있습니다.";
+const POST = (path, body) => api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 let pending = null;
-function confirmDelete(r, from) {
-  pending = { r, from };
-  $("c-name").textContent = tilde(r.path);
+
+function ask({ title, name, detail, warn = "", typeName = "", from, run }) {
+  pending = { from, run, typeName };
+  $("c-title").textContent = title;
+  $("c-name").textContent = name;
+  $("c-detail").textContent = detail;
+  $("c-warn").hidden = !warn; $("c-warn-text").textContent = warn;
+  $("c-type-wrap").hidden = !typeName; $("c-type").value = ""; $("c-type-name").textContent = typeName;
+  $("c-ok").disabled = !!typeName;
   dialog.showModal();
-  $("c-cancel").focus();
+  (typeName ? $("c-type") : $("c-cancel")).focus();
 }
+$("c-type").addEventListener("input", () => { $("c-ok").disabled = $("c-type").value.trim() !== pending.typeName; });
 $("c-cancel").onclick = () => dialog.close();
 dialog.addEventListener("close", () => { if (pending && pending.from && document.contains(pending.from)) pending.from.focus(); pending = null; });
 $("c-ok").onclick = async () => {
-  const { r } = pending;
-  const ok = $("c-ok");
+  const p = pending, ok = $("c-ok");
   ok.disabled = true;
-  try {
-    const res = await api("/api/trash", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: r.path }) });
-    dialog.close();
-    removeRow(r);
-    toast(`${r.name} 을(를) 격리 폴더로 옮겼습니다`, "되돌리기", () => undoDelete(r, res.batch));
-  } catch (e) {
-    dialog.close();
-    toast(`삭제하지 못했습니다. ${e.message}`);
-  } finally { ok.disabled = false; }
+  try { await p.run(); } catch (e) { toast(`삭제하지 못했습니다. ${e.message}`); }
+  finally { ok.disabled = false; dialog.close(); }
 };
-function removeRow(r) {
-  const i = ROWS.indexOf(r);
-  if (i >= 0) ROWS.splice(i, 1);
-  BY_PATH.delete(r.path);
-  if (state.view === r.path) {
-    const j = LIST.indexOf(r), next = LIST[j + 1] || LIST[j - 1];
+
+function confirmDelete(r, from) {
+  ask({ title: "이 파일을 삭제할까요?", name: tilde(r.path), detail: QUARANTINE_NOTE, from, run: async () => {
+    const res = await POST("/api/trash", { path: r.path });
+    removeRows([r]);
+    toast(`${r.name}을(를) 격리 폴더로 옮겼습니다`, "되돌리기", () => undoDelete([r], res.batch, r.name));
+  } });
+}
+async function confirmDeleteFolder(dir, from) {
+  let info;
+  try { info = await api(`/api/folder?path=${encodeURIComponent(dir)}`); }
+  catch (e) { toast(`이 폴더는 삭제할 수 없습니다. ${e.message}`); return; }
+  const name = labelOf(dir);
+  ask({
+    title: "이 폴더를 삭제할까요?", name: tilde(dir), from,
+    detail: `파일 ${info.files.toLocaleString()}개, ${fmtBytes(info.bytes)}를 폴더째 옮깁니다. 문서가 아닌 파일도 함께 옮겨집니다. ` + QUARANTINE_NOTE,
+    warn: info.repos.length ? `git 저장소가 걸려 있습니다: ${info.repos.map(tilde).join(", ")}. 커밋하거나 푸시하지 않은 작업이 있는지 먼저 확인하세요.` : "",
+    typeName: info.repos.length ? name : "",
+    run: async () => {
+      const res = await POST("/api/trash-folder", { path: dir });
+      const gone = ROWS.filter((r) => r.path.startsWith(dir + "/"));
+      if (state.dir === dir || state.dir.startsWith(dir + "/")) navigate({ dir: parentOf(dir) }, { push: false });
+      removeRows(gone);
+      toast(`${name} 폴더를 격리 폴더로 옮겼습니다`, "되돌리기", () => undoDelete(gone, res.batch, name + " 폴더"));
+    },
+  });
+}
+function removeRows(list) {
+  const gone = new Set(list);
+  const viewing = state.view && BY_PATH.get(state.view);
+  for (let i = ROWS.length - 1; i >= 0; i--) if (gone.has(ROWS[i])) ROWS.splice(i, 1);
+  for (const r of list) BY_PATH.delete(r.path);
+  if (viewing && gone.has(viewing)) {
+    const rest = LIST.filter((r) => !gone.has(r));
+    const j = LIST.indexOf(viewing);
+    const next = LIST.slice(j + 1).find((r) => !gone.has(r)) || LIST.slice(0, j).reverse().find((r) => !gone.has(r));
     $("viewer").dataset.path = "";
-    if (next && next !== r) navigate({ view: next.path }, { push: false }); else closeViewer();
+    if (next && rest.length) navigate({ view: next.path }, { push: false }); else closeViewer();
   }
   renderHeader(); render();
 }
-async function undoDelete(r, batch) {
+async function undoDelete(list, batch, label) {
   try {
-    await api("/api/undo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ batch }) });
-    ROWS.push(r); BY_PATH.set(r.path, r);
+    await POST("/api/undo", { batch });
+    for (const r of list) { ROWS.push(r); BY_PATH.set(r.path, r); }
     renderHeader(); render();
-    toast(`${r.name} 을(를) 되돌렸습니다`);
+    toast(`${label}을(를) 되돌렸습니다`);
   } catch (e) { toast(`되돌리지 못했습니다. ${e.message}`); }
 }
 let toastTimer = 0;

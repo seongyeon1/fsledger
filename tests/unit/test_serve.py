@@ -5,6 +5,7 @@ import json
 import os
 import sqlite3
 import threading
+import urllib.parse
 import zipfile
 from pathlib import Path
 from typing import Any, Dict, Iterator, Optional, Tuple
@@ -223,3 +224,52 @@ class TestTrash:
         assert _req(app, "POST", "/api/undo", tok, undo)[0] == 200
         assert target.read_bytes().startswith(b"# title")
         assert _req(app, "POST", "/api/undo", tok, undo)[0] == 404  # 한 번만
+
+
+class TestTrashFolder:
+    """폴더 삭제: 루트·데이터 폴더·모르는 폴더·심볼릭 링크는 거부, 폴더째 격리 후 되돌린다."""
+
+    def test_rules(self, env: tuple) -> None:
+        # Given
+        cfg, conn, root = env
+        _write(root / "proj" / "sub" / "a.md", b"# a")
+        (root / "empty").mkdir()
+        (root / "link").symlink_to(root / "proj")
+        run_scan(conn, cfg)
+
+        # When / Then
+        assert server.resolve_folder(conn, cfg, str(root / "proj")) == root / "proj"
+        assert server.resolve_folder(conn, cfg, str(root)) is None  # 루트 자체
+        assert server.resolve_folder(conn, cfg, str(root / "empty")) is None  # 원장에 없음
+        assert server.resolve_folder(conn, cfg, str(root / "link")) is None  # 링크
+        assert server.resolve_folder(conn, cfg, str(root / "proj" / ".." / "proj")) is None
+        assert server.resolve_folder(conn, cfg, "proj") is None  # 상대 경로
+        assert server.resolve_folder(conn, cfg, str(root.parent)) is None  # 루트 밖
+
+    def test_trash_then_undo(self, running: tuple) -> None:
+        # Given
+        app, root = running
+        _write(root / "proj" / "x.md", b"# x")
+        (root / "proj" / ".git").mkdir()
+        conn = app.conn()
+        run_scan(conn, app.cfg)
+        conn.close()
+        tok = {"X-Fsledger-Token": app.token}
+        q = "/api/folder?path=" + urllib.parse.quote(str(root / "proj"))
+
+        # When
+        status, raw = _req(app, "GET", q, tok)
+        info = json.loads(raw)
+        body = json.dumps({"path": str(root / "proj")}).encode()
+        assert _req(app, "POST", "/api/trash-folder", body=body)[0] == 403
+        status2, raw2 = _req(app, "POST", "/api/trash-folder", tok, body)
+
+        # Then
+        assert status == 200 and info["files"] >= 1
+        assert info["repos"] == [str(root / "proj")]
+        assert status2 == 200 and not (root / "proj").exists()
+        root_body = json.dumps({"path": str(root)}).encode()
+        assert _req(app, "POST", "/api/trash-folder", tok, root_body)[0] == 404
+        undo = json.dumps({"batch": json.loads(raw2)["batch"]}).encode()
+        assert _req(app, "POST", "/api/undo", tok, undo)[0] == 200
+        assert (root / "proj" / "x.md").read_bytes() == b"# x"

@@ -43,6 +43,49 @@ def resolve_allowed(conn: sqlite3.Connection, cfg: Config, raw: str) -> Optional
     return Path(raw)
 
 
+def resolve_folder(conn: sqlite3.Connection, cfg: Config, raw: str) -> Optional[Path]:
+    """통째로 지워도 되는 폴더면 Path, 아니면 None.
+
+    추적 루트 안쪽이어야 하고 루트 자체는 안 된다. 경로에 심볼릭 링크가 끼면 안 되고,
+    원장에 그 아래 파일 기록이 있어야 한다 (모르는 폴더는 건드리지 않는다).
+    """
+    if not raw or not os.path.isabs(raw) or os.path.normpath(raw) != raw:
+        return None
+    if os.path.islink(raw) or not os.path.isdir(raw) or os.path.realpath(raw) != raw:
+        return None
+    roots = [str(r) for r in cfg.roots]
+    if raw in roots or not any(raw.startswith(r + os.sep) for r in roots):
+        return None
+    data = str(cfg.data_dir)
+    if raw == data or raw.startswith(data + os.sep):
+        return None
+    # '/' 다음 문자가 '0' 이라 [raw/, raw0) 범위가 곧 raw 아래 전체다.
+    hit = conn.execute(
+        "SELECT 1 FROM file_versions WHERE valid_to IS NULL AND path > ? AND path < ? LIMIT 1",
+        (raw + "/", raw + "0"),
+    ).fetchone()
+    return Path(raw) if hit else None
+
+
+def folder_info(conn: sqlite3.Connection, raw: str) -> Dict[str, Any]:
+    """확인 창에 보여 줄 폴더 요약: 원장 기준 전체 파일 수·크기, 걸린 git 저장소."""
+    lo, hi = raw + "/", raw + "0"
+    files, size = conn.execute(
+        "SELECT COUNT(*), COALESCE(SUM(size), 0) FROM file_versions"
+        " WHERE valid_to IS NULL AND path > ? AND path < ?",
+        (lo, hi),
+    ).fetchone()
+    junk = conn.execute(
+        "SELECT COALESCE(SUM(bytes), 0) FROM junk_dirs WHERE path > ? AND path < ?", (lo, hi)
+    ).fetchone()[0]
+    repos = [
+        r[0]
+        for r in conn.execute("SELECT path FROM repos")
+        if r[0] == raw or r[0].startswith(lo) or raw.startswith(r[0] + "/")
+    ]
+    return {"files": files, "bytes": size + junk, "repos": sorted(repos)[:20]}
+
+
 class HubApp:
     """서버 상태: 설정, 토큰, 마지막으로 만든 페이지."""
 
@@ -143,6 +186,17 @@ def make_handler(app: HubApp) -> type:
                 if path is None:
                     return self._deny(HTTPStatus.NOT_FOUND)
                 return self._json(HTTPStatus.OK, preview.preview(path))
+            if route == "/api/folder":
+                if not self._token_ok(self.headers.get("X-Fsledger-Token")):
+                    return self._deny()
+                conn = app.conn()
+                try:
+                    folder = resolve_folder(conn, app.cfg, q.get("path", ""))
+                    if folder is None:
+                        return self._deny(HTTPStatus.NOT_FOUND)
+                    return self._json(HTTPStatus.OK, folder_info(conn, str(folder)))
+                finally:
+                    conn.close()
             if route == "/api/raw":
                 # iframe 은 헤더를 못 붙이므로 토큰을 쿼리로 받는다. PDF 만 내보낸다.
                 if not self._token_ok(q.get("t")):
@@ -169,6 +223,8 @@ def make_handler(app: HubApp) -> type:
                 return self._open(body)
             if route == "/api/trash":
                 return self._trash(body)
+            if route == "/api/trash-folder":
+                return self._trash_folder(body)
             if route == "/api/undo":
                 return self._undo(body)
             return self._deny(HTTPStatus.NOT_FOUND)
@@ -184,15 +240,25 @@ def make_handler(app: HubApp) -> type:
             return self._json(HTTPStatus.OK, {"ok": True})
 
         def _trash(self, body: Dict[str, Any]) -> None:
-            # 바로 지우지 않고 격리 폴더로 옮긴다. 작업 기록에 남아 undo 로 되돌린다.
             path = self._file({"path": str(body.get("path", ""))})
             if path is None:
                 return self._deny(HTTPStatus.NOT_FOUND)
+            return self._quarantine(str(path), "허브에서 삭제")
+
+        def _trash_folder(self, body: Dict[str, Any]) -> None:
+            conn = app.conn()
+            try:
+                folder = resolve_folder(conn, app.cfg, str(body.get("path", "")))
+            finally:
+                conn.close()
+            if folder is None:
+                return self._deny(HTTPStatus.NOT_FOUND)
+            return self._quarantine(str(folder), "허브에서 폴더 삭제")
+
+        def _quarantine(self, src: str, reason: str) -> None:
+            # 바로 지우지 않고 격리 폴더로 옮긴다. 작업 기록에 남아 undo 로 되돌린다.
             batch = ops.new_batch_id("clean")
-            src = str(path)
-            move = ops.Move(
-                "quarantine", src, ops.quarantine_target(app.cfg, batch, src), "허브에서 삭제"
-            )
+            move = ops.Move("quarantine", src, ops.quarantine_target(app.cfg, batch, src), reason)
             conn = app.conn()
             try:
                 res = ops.apply(conn, [move], batch)
