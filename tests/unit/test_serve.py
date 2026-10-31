@@ -293,6 +293,66 @@ class TestTrash:
         assert _req(app, "POST", "/api/undo", tok, undo)[0] == 404  # 한 번만
 
 
+class TestQuarantineBin:
+    """격리함: 배치 목록, 복원, 영구 삭제."""
+
+    def _trash(self, app: server.HubApp, path: Path) -> str:
+        tok = {"X-Fsledger-Token": app.token}
+        body = json.dumps({"path": str(path)}).encode()
+        status, raw = _req(app, "POST", "/api/trash", tok, body)
+        assert status == 200
+        return str(json.loads(raw)["batch"])
+
+    def test_list_restore_purge(self, running: tuple) -> None:
+        # Given: 파일 두 개를 따로 지움
+        app, root = running
+        tok = {"X-Fsledger-Token": app.token}
+        a, b = self._trash(app, root / "a.md"), self._trash(app, root / "b.pdf")
+
+        # When / Then: 목록에 크기와 원래 경로가 나온다
+        assert _req(app, "GET", "/api/quarantine")[0] == 403
+        batches = json.loads(_req(app, "GET", "/api/quarantine", tok)[1])["batches"]
+        by_id = {x["batch"]: x for x in batches}
+        assert set(by_id) == {a, b} and by_id[a]["count"] == 1
+        assert by_id[a]["bytes"] == len(b"# title\n\nbody") and by_id[a]["sample"] == str(
+            root / "a.md"
+        )
+        items = json.loads(_req(app, "GET", f"/api/quarantine/items?batch={a}", tok)[1])["items"]
+        assert items == [str(root / "a.md")]
+
+        # 복원은 이 서버가 만든 배치가 아니어도 된다
+        app.batches.clear()
+        status, raw = _req(app, "POST", "/api/restore", tok, json.dumps({"batch": a}).encode())
+        assert status == 200 and json.loads(raw)["done"] == 1 and (root / "a.md").exists()
+        assert _req(app, "POST", "/api/restore", tok, json.dumps({"batch": a}).encode())[0] == 404
+
+        # 영구 삭제: 디스크에서 사라지고 다시 복원할 수 없다
+        purge = json.dumps({"batch": b}).encode()
+        assert _req(app, "POST", "/api/purge", body=purge)[0] == 403
+        assert _req(app, "POST", "/api/purge", tok, purge)[0] == 200
+        assert not (app.cfg.quarantine_dir / b).exists() and not (root / "b.pdf").exists()
+        assert _req(app, "POST", "/api/restore", tok, json.dumps({"batch": b}).encode())[0] == 404
+        assert json.loads(_req(app, "GET", "/api/quarantine", tok)[1])["batches"] == []
+        _wait_scan(app)
+
+    def test_purge_rejects_bad_batch(self, running: tuple) -> None:
+        app, _ = running
+        tok = {"X-Fsledger-Token": app.token}
+        for bad in ("../../etc", "", "20260101-000000-clean-abcdef"):
+            body = json.dumps({"batch": bad}).encode()
+            assert _req(app, "POST", "/api/purge", tok, body)[0] == 404
+
+    def test_purge_all(self, running: tuple) -> None:
+        app, root = running
+        tok = {"X-Fsledger-Token": app.token}
+        self._trash(app, root / "a.md")
+        self._trash(app, root / "b.pdf")
+        status, raw = _req(app, "POST", "/api/purge", tok, json.dumps({"all": True}).encode())
+        assert status == 200 and json.loads(raw)["purged"] == 2
+        assert not any(app.cfg.quarantine_dir.iterdir())
+        _wait_scan(app)
+
+
 class TestTrashFolder:
     """폴더 삭제: 루트·데이터 폴더·모르는 폴더·심볼릭 링크는 거부, 폴더째 격리 후 되돌린다."""
 

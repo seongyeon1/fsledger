@@ -1,13 +1,14 @@
 """되돌릴 수 있는 파일 이동 — 실행 전에 저널에 pending 으로 먼저 기록한다 (WAL 원칙)."""
 
 import os
+import re
 import shutil
 import sqlite3
 import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 from fsledger.config import Config
 
@@ -151,22 +152,86 @@ def recover(conn: sqlite3.Connection) -> List[str]:
     return notes
 
 
+_BATCH_ID = re.compile(r"\d{8}-\d{6}-[a-z]+-[0-9a-f]{6}")
+
+
+def purge_batch(conn: sqlite3.Connection, cfg: Config, batch_id: str) -> bool:
+    """격리 배치 하나를 영구 삭제한다. 되돌릴 수 없다. 격리 중인 배치가 아니면 False."""
+    if not _BATCH_ID.fullmatch(batch_id):
+        return False
+    row = conn.execute(
+        "SELECT 1 FROM ops WHERE batch_id=? AND kind='quarantine' AND status='done' LIMIT 1",
+        (batch_id,),
+    ).fetchone()
+    if row is None:
+        return False
+    target = cfg.quarantine_dir / batch_id
+    if target.is_dir() and not target.is_symlink():
+        shutil.rmtree(target)
+    conn.execute(
+        "UPDATE ops SET status='purged', done_at=? WHERE batch_id=? AND status='done'",
+        (time.time(), batch_id),
+    )
+    return True
+
+
 def purge(conn: sqlite3.Connection, cfg: Config, older_than_days: int) -> List[str]:
     """격리한 지 N일 지난 배치를 영구 삭제한다. 되돌릴 수 없다."""
     cutoff = time.time() - older_than_days * 86_400
-    purged: List[str] = []
     rows = conn.execute(
         "SELECT batch_id FROM ops WHERE kind='quarantine' AND status='done'"
         " GROUP BY batch_id HAVING MAX(created_at) < ?",
         (cutoff,),
     ).fetchall()
-    for (batch_id,) in rows:
-        target = cfg.quarantine_dir / batch_id
-        if target.exists():
-            shutil.rmtree(target)
-        conn.execute(
-            "UPDATE ops SET status='purged', done_at=? WHERE batch_id=? AND status='done'",
-            (time.time(), batch_id),
-        )
-        purged.append(batch_id)
-    return purged
+    return [b for (b,) in rows if purge_batch(conn, cfg, b)]
+
+
+def _tree_size(path: Path) -> int:
+    total = 0
+    for dirpath, _, files in os.walk(path):
+        for f in files:
+            try:
+                total += os.lstat(os.path.join(dirpath, f)).st_size
+            except OSError:
+                continue
+    return total
+
+
+def quarantine_batches(
+    conn: sqlite3.Connection, cfg: Config, sizes: Optional[Dict[str, int]] = None
+) -> List[Dict[str, Any]]:
+    """격리 중인 배치 목록. 최근 것부터, 디스크에서 잰 크기와 함께.
+
+    배치는 만든 뒤로 바뀌지 않으므로 sizes 에 잰 크기를 담아 두고 다시 쓴다.
+    """
+    sizes = {} if sizes is None else sizes
+    rows = conn.execute(
+        "SELECT batch_id, MAX(created_at) AS at, COUNT(*) AS n,"
+        " GROUP_CONCAT(DISTINCT reason) AS reasons, MIN(src) AS sample"
+        " FROM ops WHERE kind='quarantine' AND status='done'"
+        " GROUP BY batch_id ORDER BY at DESC"
+    ).fetchall()
+    for r in rows:
+        if r["batch_id"] not in sizes:
+            sizes[r["batch_id"]] = _tree_size(cfg.quarantine_dir / r["batch_id"])
+    return [
+        {
+            "batch": r["batch_id"],
+            "at": r["at"],
+            "count": r["n"],
+            "reasons": sorted(set((r["reasons"] or "").split(","))),
+            "sample": r["sample"],
+            "bytes": sizes[r["batch_id"]],
+        }
+        for r in rows
+    ]
+
+
+def batch_items(conn: sqlite3.Connection, batch_id: str, limit: int = 300) -> List[str]:
+    """격리 배치에 든 원래 경로들 (앞에서 limit 개)."""
+    rows = conn.execute(
+        "SELECT src FROM ops WHERE batch_id=? AND kind='quarantine' AND status='done'"
+        " ORDER BY src LIMIT ?",
+        (batch_id, limit),
+    ).fetchall()
+    return [r[0] for r in rows]

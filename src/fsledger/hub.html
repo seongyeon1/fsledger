@@ -16,7 +16,26 @@
 header.top { padding-top: var(--s-600); display: flex; gap: var(--s-200); align-items: flex-start; }
 header.top .text { flex: 1; min-width: 0; }
 header.top .acts-top { display: flex; gap: var(--s-75); }
-#sync[hidden] { display: none; }
+#sync[hidden], #bin-open[hidden] { display: none; }
+dialog.bin { border: 1px solid var(--line); border-radius: var(--r-2xl); padding: var(--s-300);
+  background: var(--surface-1); color: var(--text-primary); box-shadow: var(--shadow);
+  width: min(680px, calc(100vw - 32px)); max-height: min(80vh, 760px); }
+dialog.bin[open] { display: flex; flex-direction: column; gap: var(--s-200); }
+dialog.bin::backdrop { background: rgb(0 0 0 / 0.4); }
+dialog.bin .b-head { display: flex; align-items: center; gap: var(--s-100); }
+dialog.bin .b-head + .b-sum { margin-top: calc(-1 * var(--s-100)); }
+dialog.bin .b-head h2 { flex: 1; }
+dialog.bin .b-sum { color: var(--text-secondary); }
+dialog.bin .b-list { overflow: auto; display: flex; flex-direction: column; gap: var(--s-100); min-height: 0; }
+dialog.bin .b-item { border: 1px solid var(--line); border-radius: var(--r-xl); padding: var(--s-200); }
+dialog.bin .b-top { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-75) var(--s-200); }
+dialog.bin .b-when { flex: 1; min-width: 12em; }
+dialog.bin .b-meta, dialog.bin .b-path { color: var(--text-secondary); }
+dialog.bin .b-path { margin-top: var(--s-50); word-break: break-all; }
+dialog.bin .b-acts { display: flex; gap: var(--s-75); }
+dialog.bin .b-files { margin-top: var(--s-100); max-height: 220px; overflow: auto; padding-left: var(--s-200);
+  color: var(--text-secondary); word-break: break-all; }
+dialog.bin .b-foot { display: flex; justify-content: space-between; align-items: center; gap: var(--s-100); }
 #sync.spinning .icon { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .meta-line { margin-top: var(--s-75); color: var(--text-muted); }
@@ -257,6 +276,7 @@ dialog.confirm .row { display: flex; gap: var(--s-75); justify-content: flex-end
       <p class="mode caption-2" id="mode"></p>
     </div>
     <div class="acts-top">
+      <button class="btn button-sm" type="button" id="bin-open" title="지운 파일을 복원하거나 영구 삭제합니다" hidden></button>
       <button class="btn button-sm" type="button" id="sync" title="지금 다시 스캔해 목록을 최신으로 맞춥니다" hidden></button>
       <button class="btn button-sm" type="button" id="theme" aria-label="테마 바꾸기"></button>
     </div>
@@ -339,13 +359,25 @@ dialog.confirm .row { display: flex; gap: var(--s-75); justify-content: flex-end
   <div class="v-body" id="v-body"></div>
 </section>
 
+<dialog class="bin" id="bin" aria-labelledby="b-title">
+  <div class="b-head">
+    <h2 class="title-2" id="b-title">격리함</h2>
+    <button class="icon-btn" type="button" id="b-close" aria-label="닫기" title="닫기"></button>
+  </div>
+  <p class="caption-2 b-sum" id="b-sum"></p>
+  <div class="b-list" id="b-list"></div>
+  <div class="b-foot">
+    <span class="caption-5 b-meta">설정 <code>purge_after_days</code> 로 오래된 격리분을 매일 자동으로 비울 수 있습니다.</span>
+    <button class="btn button-sm danger" type="button" id="b-empty"></button>
+  </div>
+</dialog>
 <dialog class="confirm" id="confirm" aria-labelledby="c-title">
   <h2 class="title-2" id="c-title"></h2>
   <p class="body-6 name" id="c-name"></p>
   <p class="caption-2" id="c-detail"></p>
   <div class="notice caption-2 c-warn" id="c-warn" hidden><span class="icon" data-icon="warning"></span><p id="c-warn-text"></p></div>
   <label class="c-type" id="c-type-wrap" hidden>
-    <span class="caption-2">확인하려면 폴더 이름 <b id="c-type-name"></b> 을(를) 입력하세요</span>
+    <span class="caption-2">확인하려면 <span id="c-type-hint"></span> <b id="c-type-name"></b> 을(를) 입력하세요</span>
     <span class="field body-6"><input id="c-type" autocomplete="off" spellcheck="false"></span>
   </label>
   <div class="row">
@@ -1135,9 +1167,9 @@ const QUARANTINE_NOTE = "바로 지우지 않고 격리 폴더(~/.fsledger/quara
 const POST = (path, body) => api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 let pending = null;
 
-function ask({ title, name, detail, warn = "", typeName = "", from, run,
+function ask({ title, name, detail, warn = "", typeName = "", typeHint = "폴더 이름", from, run,
   okLabel = "격리 폴더로 옮기기", okIcon = "trash", danger = true }) {
-  pending = { from, run, typeName };
+  pending = { from, run, typeName, failMsg: okLabel === "영구 삭제" || okLabel === "전체 비우기" ? "영구 삭제하지 못했습니다" : "삭제하지 못했습니다" };
   $("c-ok").replaceChildren(icon(okIcon), okLabel);
   $("c-ok").classList.toggle("solid-danger", danger);
   $("c-title").textContent = title;
@@ -1145,6 +1177,7 @@ function ask({ title, name, detail, warn = "", typeName = "", from, run,
   $("c-detail").textContent = detail;
   $("c-warn").hidden = !warn; $("c-warn-text").textContent = warn;
   $("c-type-wrap").hidden = !typeName; $("c-type").value = ""; $("c-type-name").textContent = typeName;
+  $("c-type-hint").textContent = typeHint;
   $("c-ok").disabled = !!typeName;
   dialog.showModal();
   (typeName ? $("c-type") : $("c-cancel")).focus();
@@ -1155,7 +1188,7 @@ dialog.addEventListener("close", () => { if (pending && pending.from && document
 $("c-ok").onclick = async () => {
   const p = pending, ok = $("c-ok");
   ok.disabled = true;
-  try { await p.run(); } catch (e) { toast(`삭제하지 못했습니다. ${e.message}`); }
+  try { await p.run(); } catch (e) { toast(`${p.failMsg}. ${e.message}`); }
   finally { ok.disabled = false; dialog.close(); }
 };
 
@@ -1350,7 +1383,7 @@ function reveal(nodes) {
 // 서버가 다시 스캔해 내용이 바뀌면 새로 불러온다. 보던 위치는 주소의 # 에 있어 그대로 남는다.
 const SCROLL_KEY = "fsledger.syncScroll";
 let syncWanted = false, syncTimer = 0;
-const busy = () => !!state.view || !$("editor").hidden || $("confirm").open ||
+const busy = () => !!state.view || !$("editor").hidden || $("confirm").open || $("bin").open ||
   document.activeElement === $("q");
 function paintSync(scanning) {
   const b = $("sync");
@@ -1379,7 +1412,84 @@ async function pollSync() {
   const waiting = st && (st.scanning || st.version !== DATA.version);
   syncTimer = setTimeout(pollSync, waiting ? 2000 : 30000);
 }
+// ---- 격리함 --------------------------------------------------------------
+// 지운 파일은 격리 폴더에 배치(지운 시점) 단위로 남는다. 여기서 복원하거나 영구 삭제한다.
+const bin = $("bin");
+let binBatches = [];
+const when = (t) => new Date(t * 1000).toLocaleString("ko-KR");
+function binItem(b) {
+  const reasons = b.reasons.filter(Boolean);
+  const why = reasons.length > 2 ? `${reasons.slice(0, 2).join(", ")} 외 ${reasons.length - 2}종` : reasons.join(", ");
+  const files = el("ul", { className: "b-files caption-5", hidden: true });
+  const more = el("button", { className: "btn button-sm", type: "button" }, icon("caret-down"), " 목록");
+  more.setAttribute("aria-expanded", "false");
+  more.onclick = async () => {
+    const open = more.getAttribute("aria-expanded") !== "true";
+    more.setAttribute("aria-expanded", String(open)); files.hidden = !open;
+    if (!open || files.childElementCount) return;
+    try {
+      const { items } = await api(`/api/quarantine/items?batch=${encodeURIComponent(b.batch)}`);
+      files.replaceChildren(...items.map((p) => el("li", { textContent: tilde(p) })),
+        ...(b.count > items.length ? [el("li", { textContent: `… 외 ${(b.count - items.length).toLocaleString()}개` })] : []));
+    } catch (e) { files.replaceChildren(el("li", { textContent: e.message })); }
+  };
+  const restore = el("button", { className: "btn button-sm", type: "button" }, icon("arrow-counter-clockwise"), " 복원");
+  restore.onclick = async () => {
+    restore.disabled = true;
+    try {
+      const r = await POST("/api/restore", { batch: b.batch });
+      toast(r.skipped ? `${r.done.toLocaleString()}개를 복원했습니다. ${r.skipped.toLocaleString()}개는 원래 자리에 같은 이름이 있어 남겨 두었습니다` : `${r.done.toLocaleString()}개를 원래 자리로 복원했습니다`);
+      loadBin();
+    } catch (e) { restore.disabled = false; toast(`복원하지 못했습니다. ${e.message}`); }
+  };
+  const purge = el("button", { className: "btn button-sm danger", type: "button" }, icon("trash"), " 영구 삭제");
+  purge.onclick = () => ask({
+    title: "영구 삭제할까요?", name: `${when(b.at)} · ${why}`, from: purge,
+    detail: `파일 ${b.count.toLocaleString()}개, ${fmtBytes(b.bytes)}를 디스크에서 지웁니다.`,
+    warn: "되돌릴 수 없습니다. 복원이나 fsledger undo 로도 돌아오지 않습니다.",
+    okLabel: "영구 삭제", okIcon: "trash",
+    run: async () => { await POST("/api/purge", { batch: b.batch }); toast("영구 삭제했습니다"); loadBin(); },
+  });
+  return el("div", { className: "b-item" },
+    el("div", { className: "b-top" },
+      el("span", { className: "b-when body-6", textContent: when(b.at) }),
+      el("span", { className: "b-meta caption-2", textContent: `${b.count.toLocaleString()}개 · ${fmtBytes(b.bytes)}` }),
+      el("div", { className: "b-acts" }, b.count > 1 ? more : null, restore, purge)),
+    el("p", { className: "b-path caption-2", textContent: `${why} · ${tilde(b.sample)}${b.count > 1 ? ` 외 ${(b.count - 1).toLocaleString()}개` : ""}` }),
+    files);
+}
+async function loadBin() {
+  $("b-sum").textContent = "불러오는 중…";
+  try { binBatches = (await api("/api/quarantine")).batches; }
+  catch (e) { $("b-sum").textContent = e.message; return; }
+  const total = binBatches.reduce((s, b) => s + b.bytes, 0);
+  const files = binBatches.reduce((s, b) => s + b.count, 0);
+  $("b-sum").textContent = binBatches.length
+    ? `지운 묶음 ${binBatches.length.toLocaleString()}개, 파일 ${files.toLocaleString()}개, ${fmtBytes(total)}가 있습니다. 복원하면 원래 자리로 돌아갑니다.`
+    : "격리함이 비어 있습니다.";
+  $("b-list").replaceChildren(...binBatches.map(binItem));
+  $("b-empty").disabled = !binBatches.length;
+}
+$("b-close").append(icon("x"));
+$("b-close").onclick = () => bin.close();
+$("b-empty").replaceChildren(icon("trash"), " 전체 비우기");
+$("b-empty").onclick = () => {
+  const total = binBatches.reduce((s, b) => s + b.bytes, 0);
+  const files = binBatches.reduce((s, b) => s + b.count, 0);
+  ask({
+    title: "격리함을 전부 비울까요?", name: `파일 ${files.toLocaleString()}개 · ${fmtBytes(total)}`, from: $("b-empty"),
+    detail: "격리 폴더에 있는 모든 묶음을 디스크에서 지웁니다.",
+    warn: "되돌릴 수 없습니다. 복원이나 fsledger undo 로도 돌아오지 않습니다.",
+    typeName: "비우기", typeHint: "", okLabel: "전체 비우기", okIcon: "trash",
+    run: async () => { const r = await POST("/api/purge", { all: true }); toast(`묶음 ${r.purged}개를 영구 삭제했습니다`); loadBin(); },
+  });
+};
+bin.addEventListener("close", () => { if (document.contains($("bin-open"))) $("bin-open").focus(); pollSync(); });
+
 if (SERVED) {
+  $("bin-open").hidden = false;
+  $("bin-open").replaceChildren(icon("archive"), " 격리함");
+  $("bin-open").onclick = () => { bin.showModal(); loadBin(); };
   $("sync").hidden = false;
   paintSync(false);
   $("sync").onclick = async () => {

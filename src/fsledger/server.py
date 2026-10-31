@@ -113,6 +113,7 @@ class HubApp:
         self._snapshot: Optional[int] = None
         self.batches: Set[str] = set()  # 이 서버에서 만든 삭제 배치만 되돌릴 수 있다
         self.saves: Dict[str, str] = {}  # 저장 배치 → 저장한 파일 경로
+        self.bin_sizes: Dict[str, int] = {}  # 격리 배치 → 디스크 크기 (격리함 목록용)
         self._scan_lock = threading.Lock()
         self._scan_again = False  # 스캔 중에 들어온 요청은 끝난 뒤 한 번 더 돈다
         self.scanning = False
@@ -260,6 +261,18 @@ def make_handler(app: HubApp) -> type:
                 if not self._token_ok(self.headers.get("X-Fsledger-Token")):
                     return self._deny()
                 return self._json(HTTPStatus.OK, app.state())
+            if route in ("/api/quarantine", "/api/quarantine/items"):
+                if not self._token_ok(self.headers.get("X-Fsledger-Token")):
+                    return self._deny()
+                conn = app.conn()
+                try:
+                    if route == "/api/quarantine":
+                        batches = ops.quarantine_batches(conn, app.cfg, app.bin_sizes)
+                        return self._json(HTTPStatus.OK, {"batches": batches})
+                    items = ops.batch_items(conn, q.get("batch", ""))
+                    return self._json(HTTPStatus.OK, {"items": items})
+                finally:
+                    conn.close()
             if route == "/api/preview":
                 if not self._token_ok(self.headers.get("X-Fsledger-Token")):
                     return self._deny()
@@ -318,6 +331,10 @@ def make_handler(app: HubApp) -> type:
                 return self._undo(body)
             if route == "/api/undo-save":
                 return self._undo_save(body)
+            if route == "/api/restore":
+                return self._restore(body)
+            if route == "/api/purge":
+                return self._purge(body)
             return self._deny(HTTPStatus.NOT_FOUND)
 
         def _open(self, body: Dict[str, Any]) -> None:
@@ -381,6 +398,41 @@ def make_handler(app: HubApp) -> type:
             app.batches.discard(batch)
             app.sync()
             return self._json(HTTPStatus.OK, {"ok": True})
+
+        def _restore(self, body: Dict[str, Any]) -> None:
+            # 격리함에서 복원: 이 서버가 만든 배치가 아니어도 격리 중이면 되돌린다.
+            batch = str(body.get("batch", ""))
+            conn = app.conn()
+            try:
+                if not ops.batch_items(conn, batch, limit=1):
+                    return self._deny(HTTPStatus.NOT_FOUND)
+                res = ops.undo(conn, app.cfg, batch)
+            finally:
+                conn.close()
+            app.batches.discard(batch)
+            app.bin_sizes.pop(batch, None)  # 일부만 복원됐을 수 있다
+            app.sync()
+            return self._json(
+                HTTPStatus.OK, {"done": res.done, "skipped": res.skipped + res.failed}
+            )
+
+        def _purge(self, body: Dict[str, Any]) -> None:
+            # 영구 삭제. 되돌릴 수 없으므로 화면에서 확인을 받은 뒤에만 부른다.
+            conn = app.conn()
+            try:
+                if body.get("all") is True:
+                    purged = ops.purge(conn, app.cfg, 0)
+                elif ops.purge_batch(conn, app.cfg, str(body.get("batch", ""))):
+                    purged = [str(body["batch"])]
+                else:
+                    return self._deny(HTTPStatus.NOT_FOUND)
+            finally:
+                conn.close()
+            for b in purged:
+                app.batches.discard(b)
+                app.saves.pop(b, None)
+                app.bin_sizes.pop(b, None)
+            return self._json(HTTPStatus.OK, {"purged": len(purged)})
 
         def _save(self) -> None:
             # 한글 편집기에서 저장. 원본은 격리 폴더로 옮겨 두고 새 내용을 그 자리에 쓴다.

@@ -255,8 +255,12 @@ def cmd_purge(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -
 
 
 def cmd_auto(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> int:
-    """스케줄 실행용: 중단 작업 복구 → 스캔 → auto 루트 정리 → 대시보드."""
+    """스케줄 실행용: 중단 작업 복구 → (설정 시) 오래된 격리분 삭제 → 스캔 → 정리 → 대시보드."""
     ops.recover(conn)
+    if cfg.purge_after_days:
+        purged = ops.purge(conn, cfg, cfg.purge_after_days)
+        if purged:
+            print(f"  격리 {cfg.purge_after_days}일 지난 배치 {len(purged)}개 영구 삭제")
     res = run_scan(conn, cfg)
     print(
         f"[{time.strftime('%F %T')}] 스냅샷 #{res.snapshot_id} "

@@ -325,3 +325,51 @@ class TestOrganizeAndJournal:
         # Then
         status = [r[0] for r in conn.execute("SELECT status FROM ops ORDER BY id")]
         assert status == ["done", "failed"]
+
+
+class TestPurge:
+    """격리분 영구 삭제: 나이 기준, 자동 실행은 설정을 켰을 때만."""
+
+    def _quarantine(self, conn: sqlite3.Connection, cfg: Config, src: Path, age_days: float) -> str:
+        batch = ops.new_batch_id("clean")
+        ops.apply(
+            conn,
+            [ops.Move("quarantine", str(src), ops.quarantine_target(cfg, batch, str(src)), "t")],
+            batch,
+        )
+        conn.execute(
+            "UPDATE ops SET created_at=? WHERE batch_id=?", (time.time() - age_days * 86_400, batch)
+        )
+        return batch
+
+    def test_purge_by_age(self, env: tuple) -> None:
+        # Given
+        cfg, conn, root = env
+        old = self._quarantine(conn, cfg, _write(root / "old.txt", b"o"), 40)
+        new = self._quarantine(conn, cfg, _write(root / "new.txt", b"n"), 1)
+
+        # When
+        purged = ops.purge(conn, cfg, 30)
+
+        # Then
+        assert purged == [old]
+        assert not (cfg.quarantine_dir / old).exists() and (cfg.quarantine_dir / new).exists()
+        assert ops.undo(conn, cfg, old).done == 0  # 영구 삭제한 배치는 되돌릴 수 없다
+        assert [b["batch"] for b in ops.quarantine_batches(conn, cfg)] == [new]
+
+    def test_auto_purges_only_when_enabled(self, env: tuple) -> None:
+        # Given
+        from fsledger import cli
+
+        cfg, conn, root = env
+        old = self._quarantine(conn, cfg, _write(root / "old.txt", b"o"), 40)
+        args = cli.build_parser().parse_args(["auto"])
+
+        # When: 기본값(0)이면 지우지 않는다
+        cli.cmd_auto(conn, cfg, args)
+        assert (cfg.quarantine_dir / old).exists()
+
+        # When: 켜면 오래된 배치를 지운다
+        cfg.purge_after_days = 30
+        cli.cmd_auto(conn, cfg, args)
+        assert not (cfg.quarantine_dir / old).exists()
