@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import List, Optional, Sequence
 
-from fsledger import dupes, junk, ops, organize, report
+from fsledger import dupes, hub, junk, ops, organize, report
 from fsledger.config import Config, load_config
 from fsledger.db import connect
 from fsledger.scan import ScanAborted, print_progress, run_scan
@@ -63,13 +63,39 @@ def cmd_report(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) 
     skip = {s.path for s in suggestions if s.level == junk.SAFE}
     plan = organize.plan(cfg, skip)
     path = report.write_dashboard(cfg, report.build_data(conn, cfg, groups, suggestions, plan))
+    hub_path = hub.write_hub(cfg, hub.build_data(conn, cfg))
     wasted = sum(g.wasted for g in groups)
     print(
-        f"대시보드: {path}\n  중복 {len(groups):,}묶음 ({_fmt_bytes(wasted)}) · "
+        f"대시보드: {path}\n문서·데이터 허브: {hub_path}\n"
+        f"  중복 {len(groups):,}묶음 ({_fmt_bytes(wasted)}) · "
         f"정리 후보 {len(suggestions):,}개 · 폴더 정리 대기 {len(plan):,}개"
     )
     if getattr(args, "open", False):
         subprocess.run(["open", str(path)], check=False)
+    return 0
+
+
+def cmd_hub(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> int:
+    data = hub.build_data(conn, cfg)
+    path = hub.write_hub(cfg, data)
+    print(f"문서·데이터 허브: {path}\n  {len(data['rows']):,}개 · {len(data['projects']):,}곳")
+    if args.open:
+        subprocess.run(["open", str(path)], check=False)
+    return 0
+
+
+def cmd_serve(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> int:
+    from fsledger import server
+
+    def ready(app: server.HubApp) -> None:
+        print(
+            f"허브 서버: {app.url()}\n  이 주소에만 토큰이 들어 있습니다. 끝내려면 Ctrl+C",
+            flush=True,
+        )
+        if not args.no_open:
+            subprocess.run(["open", app.url()], check=False)
+
+    server.serve(cfg, args.port, ready)
     return 0
 
 
@@ -301,6 +327,15 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("report", help="대시보드만 다시 만들기")
     s.add_argument("--open", action="store_true")
     s.set_defaults(fn=cmd_report)
+
+    s = sub.add_parser("hub", help="문서·데이터 허브만 다시 만들기 (파일은 옮기지 않음)")
+    s.add_argument("--open", action="store_true")
+    s.set_defaults(fn=cmd_hub)
+
+    s = sub.add_parser("serve", help="허브를 로컬 서버로 열기 (미리보기·앱에서 열기)")
+    s.add_argument("--port", type=int, default=8765)
+    s.add_argument("--no-open", action="store_true", help="브라우저를 열지 않기")
+    s.set_defaults(fn=cmd_serve)
 
     s = sub.add_parser("status", help="스냅샷 목록")
     s.add_argument("--limit", type=int, default=15)

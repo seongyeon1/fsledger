@@ -1,18 +1,18 @@
 """대시보드 HTML 생성 — DB 를 읽어 데이터를 박아 넣은 단일 파일을 쓴다."""
 
-import json
 import sqlite3
 import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List
 
+from fsledger import page
 from fsledger.config import Config
 from fsledger.dupes import DupeGroup
+from fsledger.hub import root_label
 from fsledger.junk import SAFE, Suggestion
 from fsledger.ops import Move
 
-ASSET = Path(__file__).with_name("dashboard.html")
 PER_RULE_LIMIT = 300
 
 
@@ -25,7 +25,7 @@ def _folder_sizes(conn: sqlite3.Connection, cfg: Config) -> List[Dict[str, Any]]
             if path.startswith(root + "/"):
                 rest = path[len(root) + 1 :]
                 head = rest.split("/", 1)[0] if "/" in rest else "(낱개 파일)"
-                key = f"{Path(root).name}/{head}"
+                key = f"{root_label(root)}/{head}"
                 sizes[key] += size
                 counts[key] += 1
                 break
@@ -33,7 +33,7 @@ def _folder_sizes(conn: sqlite3.Connection, cfg: Config) -> List[Dict[str, Any]]
         for root in roots:
             if path.startswith(root + "/"):
                 head = path[len(root) + 1 :].split("/", 1)[0]
-                sizes[f"{Path(root).name}/{head}"] += size
+                sizes[f"{root_label(root)}/{head}"] += size
                 break
     top = sorted(sizes.items(), key=lambda kv: kv[1], reverse=True)[:20]
     return [{"name": k, "bytes": v, "files": counts[k]} for k, v in top]
@@ -82,7 +82,7 @@ def build_data(
     return {
         "generated_at": time.time(),
         "db": str(cfg.db_path),
-        "roots": [str(r) for r in cfg.roots],
+        "roots": [root_label(str(r)) for r in cfg.roots],
         "last_snapshot": last,
         "snapshots": snaps,
         "changes": changes,
@@ -111,10 +111,4 @@ def build_data(
 
 def write_dashboard(cfg: Config, data: Dict[str, Any]) -> Path:
     """템플릿에 데이터를 넣어 대시보드 파일을 쓴다."""
-    payload = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
-    html = ASSET.read_text(encoding="utf-8").replace("/*__DATA__*/null", payload)
-    cfg.dashboard_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = cfg.dashboard_path.with_suffix(".tmp")
-    tmp.write_text(html, encoding="utf-8")
-    tmp.replace(cfg.dashboard_path)  # 원자적 교체 (git index.lock 방식)
-    return cfg.dashboard_path
+    return page.render("dashboard.html", data, cfg.dashboard_path)

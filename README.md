@@ -13,6 +13,8 @@
 - **한눈에 보기**: 대시보드 HTML 하나에 변경 타임라인, 큰 폴더, 중복, 정리 후보, 정리 계획이 모인다.
 - **중복·불필요 탐지**: 내용 해시로 중복을 찾고, OS 찌꺼기·캐시·미완료 다운로드·이미 푼 압축·안 쓰는
   `node_modules`/`.venv` 등을 safe / review 등급으로 제안한다.
+- **문서·데이터 허브**: 곳곳에 흩어진 문서·발표·스프레드시트·노트·데이터·노트북을 옮기지 않고
+  한 페이지에 모은다. 프로젝트(git 저장소)별로 묶고 이름·경로로 검색한다.
 - **자동 정리**: Downloads 같은 폴더의 낱개 파일을 카테고리·월별 폴더로 옮긴다.
 - **안전장치**: 아무것도 바로 지우지 않는다. 모든 이동은 선기록 저널에 남고 `undo`로 되돌린다.
   git 저장소 안은 건드리지 않는다.
@@ -45,6 +47,45 @@ fsledger status             # 스냅샷 목록과 변경 수
 fsledger changes            # 마지막 스캔의 변경 (+추가 ~수정 -삭제 >이동)
 fsledger history <파일>      # 파일 하나의 버전 이력
 fsledger asof 3 ~/Downloads # 스냅샷 #3 시점의 파일 목록
+```
+
+## 문서·데이터 허브
+
+```bash
+fsledger serve               # 로컬 서버로 열기: 미리보기·앱에서 열기·삭제까지 (권장)
+fsledger hub --open          # 파일로만 열기: ~/.fsledger/hub.html (scan·report 때도 갱신된다)
+```
+
+파일은 원래 자리에 그대로 두고, 마지막 스캔 기록에서 문서·데이터만 골라 색인한다.
+
+- **폴더 트리**: 왼쪽에서 루트부터 펼쳐 들어가면 본문이 Finder처럼 하위 폴더와 그 폴더의 파일을 보여 준다.
+  위쪽 경로 표시와 상위 폴더 버튼으로 이동한다.
+- **뒤로가기**: 폴더·필터·열어 본 파일이 주소(`#…`)에 남아서 브라우저 뒤로·앞으로·새로고침이 그대로 된다.
+- **뷰어**: 파일 이름을 누르면 오른쪽에 열린다. PDF, 마크다운, 텍스트·JSON, CSV, 엑셀, 워드
+  (macOS textutil), 파워포인트(슬라이드 글자), 노트북을 미리 본다. `j`/`k`로 다음·이전 파일, `Esc`로 닫는다.
+  iCloud에만 있는 파일은 읽지 않는다.
+- **삭제**: 바로 지우지 않고 격리 폴더로 옮긴다. 알림의 되돌리기나 `fsledger undo`로 복구한다.
+
+`fsledger serve`는 127.0.0.1 에서만 열리고, 실행할 때마다 새 토큰이 들어간 주소를 출력한다. 토큰과 Host
+헤더가 맞지 않는 요청, 원장에 없는 경로나 문서·데이터가 아닌 파일 요청은 거부한다. `file://`로 연
+페이지는 브라우저가 다른 파일 읽기를 막기 때문에 미리보기가 꺼진다.
+
+- 종류: 문서(pdf·docx·hwp…), 발표, 스프레드시트, 노트(md·txt), 데이터(csv·parquet·jsonl…),
+  노트북, 다이어그램. 저장소 안의 `.txt`·`.json`은 설정 파일이 대부분이라 뺀다.
+- 묶음: 가장 가까운 git 저장소 → 저장소를 바로 아래에 둔 프로젝트 폴더 → 루트 바로 아래 폴더.
+- `dist`·`build`·`site-packages`·venv·`.worktrees` 안은 빼고, `.claude` 같은 숨김 폴더 안은
+  기본으로 숨긴다(화면에서 켤 수 있다).
+- 위치 경로의 폴더 이름을 누르면 그 폴더 아래로 좁혀진다.
+
+범위를 넓히려면 설정의 `roots`에 폴더를 더한다. iCloud Drive도 넣을 수 있다. 내려받지 않은
+iCloud 파일은 해시를 위해 읽지 않으므로(읽으면 다운로드가 시작된다) 스캔해도 받아지지 않는다.
+
+```toml
+roots = [
+  "~/Desktop", "~/Documents", "~/Downloads",
+  "~/Library/Mobile Documents/com~apple~CloudDocs",  # iCloud Drive
+  "~/workspace",
+]
 ```
 
 ## 정리
@@ -117,6 +158,13 @@ uv run ruff check src tests && uv run ruff format --check src tests
 uv run mypy
 ```
 
+## 화면
+
+대시보드와 허브는 외부 라이브러리 없는 단일 HTML 파일이다. 둘이 같은 디자인 토큰(`theme.css`)을 쓴다.
+간격·반경·글자 크기는 [ai-design-skills](https://github.com/elayadesign/ai-design-skills)의
+`landing-page-design` Part B 규칙을 따랐다. 글꼴 Geist는 Google Fonts에서 불러오고, 오프라인이면
+시스템 글꼴로 대신 표시한다(파일 정보는 밖으로 나가지 않는다).
+
 ## 라이선스
 
-MIT
+MIT. 아이콘은 [Phosphor Icons](https://phosphoricons.com) (MIT).

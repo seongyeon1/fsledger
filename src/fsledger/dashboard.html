@@ -4,155 +4,129 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>fsledger</title>
+<meta name="description" content="로컬 파일 변경 이력, 중복, 정리 후보를 한 화면에서 보는 fsledger 대시보드">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232a78d6'/%3E%3Cpath d='M9 11h14M9 16h14M9 21h9' stroke='white' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<style>/*__THEME__*/</style>
 <style>
-:root {
-  color-scheme: light;
-  --bg: #f6f6f4; --surface-1: #fcfcfb; --surface-2: #f0efec; --line: #e2e1dc;
-  --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #7a7974;
-  --accent: #2a78d6;
-  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100;
-  --safe: #008300; --review: #b86e00; --danger: #c43c3b;
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 var(--s-200); }
+header.top { padding-top: var(--s-600); display: flex; gap: var(--s-200); align-items: flex-start; }
+header.top .text { flex: 1; min-width: 0; }
+.meta-line { margin-top: var(--s-75); color: var(--text-muted); }
+nav.tabs {
+  width: fit-content; max-width: 100%; margin: var(--s-300) auto 0; padding: var(--s-50);
+  border-radius: var(--r-full); display: flex; gap: var(--s-50); overflow-x: auto;
+  scrollbar-width: none;
 }
-@media (prefers-color-scheme: dark) {
-  :root:where(:not([data-theme="light"])) {
-    color-scheme: dark;
-    --bg: #121211; --surface-1: #1a1a19; --surface-2: #232321; --line: #31312e;
-    --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8e8d86;
-    --accent: #3987e5;
-    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
-    --safe: #3fb03f; --review: #e09b2d; --danger: #e66767;
-  }
+nav.tabs button {
+  font: inherit; color: var(--text-secondary); background: none; border: 0; white-space: nowrap;
+  padding: var(--s-75) var(--s-200); border-radius: var(--r-full); cursor: pointer;
+  transition: background-color 300ms var(--ease), color 300ms var(--ease), transform 300ms var(--ease);
 }
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --bg: #121211; --surface-1: #1a1a19; --surface-2: #232321; --line: #31312e;
-  --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8e8d86;
-  --accent: #3987e5;
-  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
-  --safe: #3fb03f; --review: #e09b2d; --danger: #e66767;
-}
-* { box-sizing: border-box; }
-body {
-  margin: 0; background: var(--bg); color: var(--text-primary);
-  font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard",
-    system-ui, sans-serif;
-}
-code, .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; }
-header { padding: 28px 16px 8px; max-width: 1180px; margin: 0 auto; }
-header h1 { margin: 0; font-size: 22px; letter-spacing: -0.01em; }
-header p { margin: 4px 0 0; color: var(--text-secondary); }
-nav {
-  position: sticky; top: 0; z-index: 5; background: var(--bg);
-  border-bottom: 1px solid var(--line);
-}
-nav .inner { max-width: 1180px; margin: 0 auto; padding: 0 16px; display: flex; gap: 4px;
-  overflow-x: auto; }
-nav button {
-  border: 0; background: none; color: var(--text-secondary); padding: 12px 12px 10px;
-  font: inherit; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap;
-}
-nav button[aria-selected="true"] { color: var(--text-primary); border-color: var(--accent);
-  font-weight: 600; }
-main { max-width: 1180px; margin: 0 auto; padding: 20px 16px 64px; }
+nav.tabs button:hover { color: var(--text-primary); }
+nav.tabs button:active { transform: scale(0.98); }
+nav.tabs button[aria-selected="true"] { background: var(--surface-1); color: var(--text-primary);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08); }
+main { padding: var(--s-300) 0 var(--s-700); }
 section[hidden] { display: none; }
-.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
-.kpi { background: var(--surface-1); border: 1px solid var(--line); border-radius: 10px;
-  padding: 14px 16px; }
-.kpi .label { color: var(--text-secondary); font-size: 12.5px; }
-.kpi .value { font-size: 24px; font-weight: 650; margin-top: 2px; font-variant-numeric: tabular-nums; }
-.kpi .sub { color: var(--text-muted); font-size: 12px; }
-.card { background: var(--surface-1); border: 1px solid var(--line); border-radius: 10px;
-  padding: 16px; margin-top: 16px; }
-.card h2 { font-size: 15px; margin: 0 0 4px; }
-.card .desc { color: var(--text-secondary); margin: 0 0 12px; font-size: 13px; }
-.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-secondary);
-  margin-bottom: 8px; }
-.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px;
-  margin-right: 5px; vertical-align: -1px; }
+section > .kpis + .card, section > .card:first-child { margin-top: 0; }
+section > .kpis { margin-bottom: var(--s-200); }
+.card h2 { color: var(--text-primary); }
+.legend { display: flex; gap: var(--s-200); flex-wrap: wrap; color: var(--text-secondary);
+  margin-bottom: var(--s-75); }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: var(--r-sm);
+  margin-right: var(--s-50); vertical-align: -2px; }
 .chart { position: relative; }
 .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
-.tip { position: absolute; pointer-events: none; background: var(--surface-2);
-  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 12.5px;
-  box-shadow: 0 4px 16px rgba(0,0,0,.12); white-space: nowrap; opacity: 0;
-  transition: opacity .12s; z-index: 3; }
+.chart text { font-family: var(--font); }
+.tip { position: absolute; pointer-events: none; background: var(--surface-1);
+  border: 1px solid var(--line); border-radius: var(--r-lg); padding: var(--s-75) var(--s-100);
+  box-shadow: var(--shadow); white-space: nowrap; opacity: 0; z-index: 3;
+  transition: opacity 200ms var(--ease); }
 .tip b { font-variant-numeric: tabular-nums; }
-.bars .row { display: grid; grid-template-columns: minmax(120px, 34%) 1fr 84px; gap: 10px;
-  align-items: center; padding: 4px 0; }
+.bars .row { display: grid; grid-template-columns: minmax(120px, 34%) 1fr 88px; gap: var(--s-100);
+  align-items: center; padding: var(--s-50) 0; }
 .bars .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bars .track { height: 10px; }
-.bars .fill { height: 10px; background: var(--series-1); border-radius: 0 4px 4px 0; min-width: 2px; }
+.bars .track { height: 12px; }
+.bars .fill { height: 12px; background: var(--series-1); border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  min-width: 2px; }
 .bars .num { text-align: right; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th { text-align: left; color: var(--text-secondary); font-weight: 500; padding: 6px 8px;
-  border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--surface-1); }
-td { padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
-td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+td { font-size: 14px; line-height: 20px; }
 .path { word-break: break-all; }
-.dim { color: var(--text-muted); }
-.scroll { max-height: 560px; overflow: auto; }
-.pill { display: inline-block; font-size: 11.5px; padding: 1px 8px; border-radius: 99px;
-  border: 1px solid currentColor; white-space: nowrap; }
+.dim { color: var(--text-muted); font-size: 12px; line-height: 16px; }
+.scroll { max-height: 560px; overflow: auto; border: 1px solid var(--line); border-radius: var(--r-lg); }
+.scroll th { position: sticky; top: 0; }
+.pill { display: inline-block; font-size: 12px; line-height: 16px; font-weight: 500;
+  padding: 0 var(--s-75); border-radius: var(--r-full); border: 1px solid currentColor; white-space: nowrap; }
 .pill.safe { color: var(--safe); } .pill.review { color: var(--review); }
 td[class^="k-"] { white-space: nowrap; }
 td[class^="k-"]::before { content: ""; display: inline-block; width: 8px; height: 8px;
-  border-radius: 2px; margin-right: 6px; }
+  border-radius: var(--r-sm); margin-right: var(--s-75); }
 .k-added::before { background: var(--series-1); } .k-modified::before { background: var(--series-2); }
 .k-moved::before { background: var(--series-3); } .k-deleted::before { background: var(--series-4); }
-.toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
-.toolbar input, .toolbar select {
-  font: inherit; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line);
-  background: var(--surface-2); color: var(--text-primary); min-width: 0;
-}
-.toolbar input { flex: 1 1 220px; }
-.cmd { background: var(--surface-2); border-radius: 8px; padding: 10px 12px; margin: 8px 0 0;
-  overflow-x: auto; }
-.group { border-top: 1px solid var(--line); padding: 10px 0; }
-.group:first-child { border-top: 0; }
-.group .keep { color: var(--safe); font-weight: 600; font-size: 12px; margin-right: 6px; }
-.group .drop { color: var(--review); font-weight: 600; font-size: 12px; margin-right: 6px; }
-details summary { cursor: pointer; color: var(--text-secondary); }
-.empty { color: var(--text-muted); padding: 20px 0; text-align: center; }
-.theme { margin-left: auto; }
+.toolbar { display: flex; gap: var(--s-75); flex-wrap: wrap; align-items: center; margin-bottom: var(--s-100); }
+.toolbar .field { flex: 1 1 240px; }
+.cmd { background: var(--surface-2); border-radius: var(--r-lg); padding: var(--s-100) var(--s-200);
+  margin: var(--s-200) 0 0; overflow-x: auto; }
+.group { border-top: 1px solid var(--line); padding: var(--s-100) 0; }
+.group:first-child { border-top: 0; padding-top: 0; }
+.group .keep { color: var(--safe); font-weight: 600; font-size: 12px; margin-right: var(--s-75); }
+.group .drop { color: var(--review); font-weight: 600; font-size: 12px; margin-right: var(--s-75); }
+details { margin-top: var(--s-200); }
+details summary { cursor: pointer; color: var(--text-secondary); border-radius: var(--r-sm);
+  transition: color 300ms var(--ease); }
+details summary:hover { color: var(--text-primary); }
+details .scroll { margin-top: var(--s-75); }
 @media (max-width: 640px) {
-  .bars .row { grid-template-columns: 1fr 64px; }
+  header.top { padding-top: var(--s-400); }
+  nav.tabs { position: static; }
+  .bars .row { grid-template-columns: 1fr 72px; }
   .bars .track { grid-column: 1 / -1; order: 3; }
   .hide-sm { display: none; }
 }
 </style>
 </head>
 <body>
-<header>
-  <h1>fsledger</h1>
-  <p id="sub"></p>
+<a class="skip button-sm" href="#main">본문으로 건너뛰기</a>
+<div class="wrap">
+<header class="top">
+  <div class="text">
+    <h1 class="page-title heading-4">fsledger</h1>
+    <p class="page-sub body-3">홈 폴더 파일이 언제 어떻게 바뀌었는지, 무엇을 정리할 수 있는지 봅니다.</p>
+    <p class="meta-line caption-5" id="sub"></p>
+  </div>
+  <button class="btn button-sm" type="button" id="theme" aria-label="테마 바꾸기"></button>
 </header>
-<nav><div class="inner" role="tablist" id="tabs"></div></nav>
-<main>
+<nav class="tabs floating button-sm" role="tablist" id="tabs" aria-label="대시보드 탭"></nav>
+<main id="main" tabindex="-1">
   <section id="t-overview">
     <div class="kpis" id="kpis"></div>
     <div class="card">
-      <h2>스캔별 변경</h2>
-      <p class="desc">스냅샷 하나가 스캔 한 번입니다. 첫 스캔(전체 등록)은 빼고 그렸습니다.</p>
+      <h2 class="title-2">스캔별 변경</h2>
+      <p class="desc caption-2">스냅샷 하나가 스캔 한 번입니다. 첫 스캔(전체 등록)은 빼고 그렸습니다.</p>
       <div class="legend" id="tl-legend"></div>
       <div class="chart" id="timeline"></div>
-      <details style="margin-top:10px"><summary>숫자 표로 보기</summary>
-        <div class="scroll" style="max-height:280px"><table id="snap-table"></table></div>
+      <details><summary class="caption-2">숫자 표로 보기</summary>
+        <div class="scroll" style="max-height:288px"><table id="snap-table"></table></div>
       </details>
     </div>
     <div class="card">
-      <h2>용량이 큰 폴더</h2>
-      <p class="desc">추적 루트 바로 아래 폴더 기준입니다. node_modules 같은 재생성 폴더 크기도 포함됩니다.</p>
+      <h2 class="title-2">용량이 큰 폴더</h2>
+      <p class="desc caption-2">추적 루트 바로 아래 폴더 기준입니다. node_modules 같은 재생성 폴더 크기도 포함됩니다.</p>
       <div class="bars" id="folders"></div>
     </div>
   </section>
 
   <section id="t-changes" hidden>
     <div class="card">
-      <h2>최근 변경</h2>
-      <p class="desc">CDC 방식으로 쌓인 이벤트입니다. 특정 파일의 전체 이력은
+      <h2 class="title-2">최근 변경</h2>
+      <p class="desc caption-2">CDC 방식으로 쌓인 이벤트입니다. 특정 파일의 전체 이력은
         <code>fsledger history &lt;경로&gt;</code> 로 봅니다.</p>
       <div class="toolbar">
-        <input id="ch-q" placeholder="경로 검색" aria-label="경로 검색">
-        <select id="ch-kind" aria-label="종류">
+        <label class="field body-6"><span class="icon" data-icon="magnifying-glass"></span><input type="search" id="ch-q" placeholder="경로 검색" aria-label="경로 검색"></label>
+        <select class="body-6" id="ch-kind" aria-label="종류">
           <option value="">전체</option><option value="added">추가</option>
           <option value="modified">수정</option><option value="deleted">삭제</option>
           <option value="moved">이동</option>
@@ -164,10 +138,10 @@ details summary { cursor: pointer; color: var(--text-secondary); }
 
   <section id="t-dupes" hidden>
     <div class="card">
-      <h2>중복 파일</h2>
-      <p class="desc">내용 해시가 같은 파일 묶음입니다. 맨 위가 남길 원본이고, 나머지는 정리 후보에 들어갑니다.
+      <h2 class="title-2">중복 파일</h2>
+      <p class="desc caption-2">내용 해시가 같은 파일 묶음입니다. 맨 위가 남길 원본이고, 나머지는 정리 후보에 들어갑니다.
         원본 선택 기준: Downloads 밖 → 복사본 이름이 아닌 쪽 → 경로가 짧은 쪽.</p>
-      <div class="toolbar"><input id="du-q" placeholder="경로 검색" aria-label="중복 검색"></div>
+      <div class="toolbar"><label class="field body-6"><span class="icon" data-icon="magnifying-glass"></span><input type="search" id="du-q" placeholder="경로 검색" aria-label="중복 검색"></label></div>
       <div id="du-list"></div>
     </div>
   </section>
@@ -175,17 +149,17 @@ details summary { cursor: pointer; color: var(--text-secondary); }
   <section id="t-junk" hidden>
     <div class="kpis" id="junk-kpis"></div>
     <div class="card">
-      <h2>규칙별 합계</h2>
-      <p class="desc"><span class="pill safe">safe</span> 는 OS나 도구가 다시 만드는 것,
+      <h2 class="title-2">규칙별 합계</h2>
+      <p class="desc caption-2"><span class="pill safe">safe</span> 는 OS나 도구가 다시 만드는 것,
         <span class="pill review">review</span> 는 한 번 보고 판단할 것입니다.</p>
       <table id="rule-table"></table>
       <pre class="cmd mono" id="clean-cmd"></pre>
     </div>
     <div class="card">
-      <h2>정리 후보</h2>
+      <h2 class="title-2">정리 후보</h2>
       <div class="toolbar">
-        <input id="ju-q" placeholder="경로 검색" aria-label="후보 검색">
-        <select id="ju-rule" aria-label="규칙"></select>
+        <label class="field body-6"><span class="icon" data-icon="magnifying-glass"></span><input type="search" id="ju-q" placeholder="경로 검색" aria-label="후보 검색"></label>
+        <select class="body-6" id="ju-rule" aria-label="규칙"></select>
       </div>
       <div class="scroll"><table id="ju-table"></table></div>
     </div>
@@ -193,8 +167,8 @@ details summary { cursor: pointer; color: var(--text-secondary); }
 
   <section id="t-plan" hidden>
     <div class="card">
-      <h2>폴더 정리 계획</h2>
-      <p class="desc">정리 루트 최상위의 낱개 파일만 카테고리 폴더로 옮깁니다. 폴더, 숨김 파일,
+      <h2 class="title-2">폴더 정리 계획</h2>
+      <p class="desc caption-2">정리 루트 최상위의 낱개 파일만 카테고리 폴더로 옮깁니다. 폴더, 숨김 파일,
         최근 이틀 안에 수정한 파일, git 저장소는 건드리지 않습니다. 모든 이동은 되돌릴 수 있습니다.</p>
       <div class="bars" id="plan-cats"></div>
       <pre class="cmd mono">fsledger organize            # 계획만 보기
@@ -202,26 +176,31 @@ fsledger organize --apply    # 실행
 fsledger undo                # 마지막 배치 되돌리기</pre>
     </div>
     <div class="card">
-      <h2>이동 목록</h2>
-      <div class="toolbar"><input id="pl-q" placeholder="파일 이름 검색" aria-label="계획 검색"></div>
+      <h2 class="title-2">이동 목록</h2>
+      <div class="toolbar"><label class="field body-6"><span class="icon" data-icon="magnifying-glass"></span><input type="search" id="pl-q" placeholder="파일 이름 검색" aria-label="계획 검색"></label></div>
       <div class="scroll"><table id="pl-table"></table></div>
     </div>
   </section>
 
   <section id="t-ops" hidden>
     <div class="card">
-      <h2>작업 기록</h2>
-      <p class="desc">이동 전에 pending 으로 먼저 기록하고, 끝나면 done 으로 바꿉니다 (WAL 원칙).
+      <h2 class="title-2">작업 기록</h2>
+      <p class="desc caption-2">이동 전에 pending 으로 먼저 기록하고, 끝나면 done 으로 바꿉니다 (WAL 원칙).
         <code>fsledger undo &lt;batch&gt;</code> 로 배치 단위로 되돌립니다.</p>
       <div class="scroll"><table id="ops-table"></table></div>
     </div>
   </section>
 </main>
+</div>
 
 <script id="data" type="application/json">/*__DATA__*/null</script>
 <script>
 const D = JSON.parse(document.getElementById("data").textContent);
+const ICONS = /*__ICONS__*/null;
 const $ = (id) => document.getElementById(id);
+const svg = (name) => `<span class="icon" aria-hidden="true"><svg viewBox="0 0 256 256" fill="currentColor">${ICONS[name] || ""}</svg></span>`;
+document.querySelectorAll("[data-icon]").forEach((s) => { s.outerHTML = svg(s.dataset.icon); });
+const empty = (msg, name = "funnel-x") => `<div class="empty-state">${svg(name)}<p class="title-3">${msg}</p></div>`;
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const fmtB = (n) => {
   const a = Math.abs(n), u = ["B","KB","MB","GB","TB"]; let i = 0, v = a;
@@ -248,22 +227,27 @@ for (const [k, label] of TABS) {
   b.textContent = label; b.dataset.k = k; b.setAttribute("role", "tab");
   b.onclick = () => show(k); tabs.appendChild(b);
 }
-const themeBtn = document.createElement("button");
-themeBtn.className = "theme"; themeBtn.textContent = "테마";
+const themeBtn = $("theme");
+function setThemeIcon() {
+  const dark = (document.documentElement.dataset.theme ||
+    (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark";
+  themeBtn.innerHTML = svg(dark ? "sun" : "moon");
+}
 themeBtn.onclick = () => {
   const dark = matchMedia("(prefers-color-scheme: dark)").matches;
   const cur = document.documentElement.dataset.theme || (dark ? "dark" : "light");
   document.documentElement.dataset.theme = cur === "dark" ? "light" : "dark";
+  setThemeIcon();
   drawTimeline();
 };
-tabs.appendChild(themeBtn);
+setThemeIcon();
 let saved = "overview"; try { saved = localStorage.getItem("fsledger.tab") || saved; } catch (e) {}
 show(TABS.some(([k]) => k === saved) ? saved : "overview");
 
 // header + KPIs
 const last = D.snapshots[D.snapshots.length - 1] || {};
 $("sub").textContent = `마지막 스캔 ${fmtT(last.finished_at)} · 스냅샷 #${last.id ?? "—"} · ` +
-  D.roots.map(home).join(", ") + ` · 생성 ${fmtT(D.generated_at)}`;
+  D.roots.join(", ") + ` · 생성 ${fmtT(D.generated_at)}`;
 const reclaim = D.suggestions.safe_bytes + D.suggestions.review_bytes;
 $("kpis").innerHTML = [
   ["추적 중인 파일", fmtN(last.files ?? 0), fmtB(last.bytes ?? 0)],
@@ -273,7 +257,7 @@ $("kpis").innerHTML = [
   ["정리하면 확보 가능", fmtB(reclaim), `safe ${fmtB(D.suggestions.safe_bytes)} · 후보 ${fmtN(D.suggestions.total)}개`],
   ["정리 대기 파일", fmtN(D.plan.length), "최상위 낱개 파일"],
   ["git 저장소", fmtN(D.repos), "정리 대상에서 제외"],
-].map(([l, v, s]) => `<div class="kpi"><div class="label">${l}</div><div class="value">${v}</div><div class="sub">${s}</div></div>`).join("");
+].map(([l, v, s]) => `<div class="kpi"><div class="label caption-2">${l}</div><div class="value heading-5">${v}</div><div class="sub caption-5">${s}</div></div>`).join("");
 
 // timeline: stacked bars per snapshot
 const SER = [["added","추가","--series-1"],["modified","수정","--series-2"],["moved","이동","--series-3"],["deleted","삭제","--series-4"]];
@@ -281,7 +265,7 @@ $("tl-legend").innerHTML = SER.map(([,l,v]) => `<span><i style="background:var($
 function drawTimeline() {
   const el = $("timeline");
   const snaps = D.snapshots.filter((s) => s.id > 1);
-  if (!snaps.length) { el.innerHTML = `<div class="empty">아직 비교할 스캔이 없습니다. 내일 다시 스캔하면 변경이 보입니다.</div>`; return; }
+  if (!snaps.length) { el.innerHTML = empty("아직 비교할 스캔이 없습니다. 다음 스캔부터 변경이 보입니다.", "arrow-counter-clockwise"); return; }
   const css = getComputedStyle(document.documentElement);
   const W = 1000, H = 220, pl = 44, pb = 22, pt = 8;
   const tot = (s) => s.added + s.modified + s.moved + s.deleted;
@@ -293,7 +277,7 @@ function drawTimeline() {
   for (let i = 0; i <= 4; i++) {
     const v = Math.round(max * i / 4), yy = y(v);
     g += `<line x1="${pl}" x2="${W}" y1="${yy}" y2="${yy}" stroke="${css.getPropertyValue("--line")}" stroke-width="1"/>`;
-    g += `<text x="${pl - 6}" y="${yy + 4}" text-anchor="end" font-size="11" fill="${css.getPropertyValue("--text-muted")}">${fmtN(v)}</text>`;
+    g += `<text x="${pl - 6}" y="${yy + 4}" text-anchor="end" font-size="12" fill="${css.getPropertyValue("--text-muted")}">${fmtN(v)}</text>`;
   }
   snaps.forEach((s, i) => {
     const x = pl + i * step + (step - bw) / 2;
@@ -309,7 +293,7 @@ function drawTimeline() {
     });
     g += `<rect class="hit" data-i="${i}" x="${pl + i * step}" y="${pt}" width="${step}" height="${H - pt - pb}" fill="transparent"/>`;
     if (snaps.length <= 14 || i % Math.ceil(snaps.length / 10) === 0)
-      g += `<text x="${x + bw / 2}" y="${H - 6}" text-anchor="middle" font-size="11" fill="${css.getPropertyValue("--text-muted")}">#${s.id}</text>`;
+      g += `<text x="${x + bw / 2}" y="${H - 6}" text-anchor="middle" font-size="12" fill="${css.getPropertyValue("--text-muted")}">#${s.id}</text>`;
   });
   el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="스캔별 변경 누적 막대">${g}</svg><div class="tip" id="tip"></div>`;
   const tip = $("tip");
@@ -334,7 +318,7 @@ $("snap-table").innerHTML = `<tr><th>#</th><th>시작</th><th class="num">파일
 function bars(el, rows) {
   const max = Math.max(1, ...rows.map((r) => r.v));
   el.innerHTML = rows.length ? rows.map((r) => `<div class="row" title="${esc(r.title || r.name)}"><div class="name">${esc(r.name)}</div><div class="track"><div class="fill" style="width:${(r.v / max * 100).toFixed(2)}%"></div></div><div class="num">${r.label}</div></div>`).join("")
-    : `<div class="empty">없음</div>`;
+    : empty("표시할 항목이 없습니다.");
 }
 bars($("folders"), D.folders.map((f) => ({ name: f.name, v: f.bytes, label: fmtB(f.bytes), title: `${f.name} · ${fmtN(f.files)}개 파일` })));
 
@@ -344,7 +328,7 @@ function renderChanges() {
   const rows = D.changes.filter((c) => (!k || c.kind === k) && (!q || c.path.toLowerCase().includes(q) || (c.old_path || "").toLowerCase().includes(q)));
   $("ch-table").innerHTML = `<tr><th>종류</th><th>경로</th><th class="num hide-sm">크기 변화</th><th class="num">스캔</th></tr>` +
     (rows.length ? rows.slice(0, 400).map((c) => `<tr><td class="k-${c.kind}">${KIND[c.kind]}</td><td class="path">${esc(home(c.path))}${c.old_path ? `<div class="dim">← ${esc(home(c.old_path))}</div>` : ""}</td><td class="num hide-sm">${c.size_delta ? fmtB(c.size_delta) : "—"}</td><td class="num">#${c.snapshot_id}<div class="dim">${fmtT(c.started_at)}</div></td></tr>`).join("")
-      : `<tr><td colspan="4" class="empty">변경 이벤트가 없습니다. 두 번째 스캔부터 쌓입니다.</td></tr>`);
+      : `<tr><td colspan="4">${empty("변경 이벤트가 없습니다. 두 번째 스캔부터 쌓입니다.")}</td></tr>`);
 }
 $("ch-q").oninput = renderChanges; $("ch-kind").onchange = renderChanges; renderChanges();
 
@@ -354,7 +338,7 @@ function renderDupes() {
   const gs = D.dupes.top.filter((g) => !q || g.paths.some((p) => p.toLowerCase().includes(q)));
   $("du-list").innerHTML = gs.length ? gs.map((g) => `<div class="group"><div><b>${fmtB(g.size)}</b> × ${g.paths.length} <span class="dim">— 낭비 ${fmtB(g.size * (g.paths.length - 1))} · <span class="mono">${g.hash}</span></span></div>` +
     g.paths.map((p, i) => `<div class="path">${i ? '<span class="drop">후보</span>' : '<span class="keep">원본</span>'}${esc(home(p))}</div>`).join("") + `</div>`).join("")
-    : `<div class="empty">중복 묶음이 없습니다.</div>`;
+    : empty("중복 묶음이 없습니다.");
 }
 $("du-q").oninput = renderDupes; renderDupes();
 
@@ -364,7 +348,7 @@ $("junk-kpis").innerHTML = [
   ["safe 후보", fmtB(S.safe_bytes), "바로 정리해도 되는 것"],
   ["review 후보", fmtB(S.review_bytes), "확인이 필요한 것"],
   ["후보 수", fmtN(S.total), S.total > S.items.length ? `규칙별 상위 300개씩 표시` : "전체 표시"],
-].map(([l, v, s]) => `<div class="kpi"><div class="label">${l}</div><div class="value">${v}</div><div class="sub">${s}</div></div>`).join("");
+].map(([l, v, s]) => `<div class="kpi"><div class="label caption-2">${l}</div><div class="value heading-5">${v}</div><div class="sub caption-5">${s}</div></div>`).join("");
 const RULE = {"os-litter":"OS 메타데이터","appledouble":"AppleDouble 조각","office-lock":"Office 잠금 파일","partial-download":"미완료 다운로드","empty-file":"빈 파일","old-installer":"오래된 설치 파일","stale-large-download":"오래된 대용량 다운로드","extracted-archive":"이미 푼 압축 파일","cache-dir":"캐시 디렉터리","stale-deps":"안 쓰는 프로젝트 의존성","duplicate":"중복 사본"};
 $("rule-table").innerHTML = `<tr><th>규칙</th><th>등급</th><th class="num">개수</th><th class="num">용량</th></tr>` +
   S.rules.map((r) => `<tr><td>${RULE[r.rule] || r.rule} <span class="dim mono">${r.rule}</span></td><td><span class="pill ${r.level}">${r.level}</span></td><td class="num">${fmtN(r.n)}</td><td class="num">${fmtB(r.bytes)}</td></tr>`).join("");
@@ -379,7 +363,7 @@ function renderJunk() {
   const rows = S.items.filter((s) => (!rule || s.rule === rule) && (!q || s.path.toLowerCase().includes(q)));
   $("ju-table").innerHTML = `<tr><th>등급</th><th>경로 · 이유</th><th class="num">용량</th></tr>` +
     (rows.length ? rows.slice(0, 600).map((s) => `<tr><td><span class="pill ${s.level}">${s.level}</span></td><td class="path">${esc(home(s.path))}${s.is_dir ? "/" : ""}<div class="dim">${esc(s.reason.replace(/\/Users\/[^/]+/g, "~"))}</div></td><td class="num">${fmtB(s.bytes)}</td></tr>`).join("")
-      : `<tr><td colspan="3" class="empty">후보가 없습니다.</td></tr>`);
+      : `<tr><td colspan="3">${empty("후보가 없습니다.")}</td></tr>`);
 }
 $("ju-q").oninput = renderJunk; $("ju-rule").onchange = renderJunk; renderJunk();
 
@@ -392,14 +376,22 @@ function renderPlan() {
   const rows = D.plan.filter((m) => !q || m.src.toLowerCase().includes(q));
   $("pl-table").innerHTML = `<tr><th>지금 위치</th><th>옮길 위치</th></tr>` +
     (rows.length ? rows.slice(0, 800).map((m) => `<tr><td class="path">${esc(home(m.src))}</td><td class="path">${esc(home(m.dst))}</td></tr>`).join("")
-      : `<tr><td colspan="2" class="empty">정리할 파일이 없습니다.</td></tr>`);
+      : `<tr><td colspan="2">${empty("정리할 파일이 없습니다.")}</td></tr>`);
 }
 $("pl-q").oninput = renderPlan; renderPlan();
 
 // ops
 $("ops-table").innerHTML = `<tr><th>배치</th><th>종류</th><th>상태</th><th class="num">개수</th><th class="num">시각</th></tr>` +
   (D.batches.length ? D.batches.map((b) => `<tr><td class="mono">${esc(b.batch_id)}</td><td>${b.kind === "quarantine" ? "격리" : "정리"}</td><td>${b.status}</td><td class="num">${fmtN(b.n)}</td><td class="num">${fmtT(b.at)}</td></tr>`).join("")
-    : `<tr><td colspan="5" class="empty">아직 실행한 작업이 없습니다.</td></tr>`);
+    : `<tr><td colspan="5">${empty("아직 실행한 작업이 없습니다.")}</td></tr>`);
+
+// 처음 보일 때 한 번만 올라오며 나타난다. 숨은 탭의 카드는 그 탭을 열 때 나타난다.
+if ("IntersectionObserver" in window) {
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+  }, { rootMargin: "0px 0px -8% 0px" });
+  document.querySelectorAll("main .card, main .kpi").forEach((n) => { n.classList.add("reveal"); io.observe(n); });
+}
 </script>
 </body>
 </html>

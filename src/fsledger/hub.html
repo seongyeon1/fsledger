@@ -1,0 +1,1051 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>문서·데이터 허브</title>
+<meta name="description" content="흩어진 문서와 데이터를 옮기지 않고 한곳에서 찾는 fsledger 허브">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232a78d6'/%3E%3Cpath d='M9 11h14M9 16h14M9 21h9' stroke='white' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<style>/*__THEME__*/</style>
+<style>
+.wrap { max-width: 1280px; margin: 0 auto; padding: 0 var(--s-200); }
+header.top { padding-top: var(--s-600); display: flex; gap: var(--s-200); align-items: flex-start; }
+header.top .text { flex: 1; min-width: 0; }
+.meta-line { margin-top: var(--s-75); color: var(--text-muted); }
+.mode { margin-top: var(--s-100); display: flex; gap: var(--s-75); align-items: center; color: var(--text-secondary); }
+.kpis { margin-top: var(--s-300); }
+
+.bar {
+  margin-top: var(--s-300); border-radius: 24px; padding: var(--s-200);
+  display: flex; flex-direction: column; gap: var(--s-100);
+}
+.bar .row { display: flex; gap: var(--s-75); flex-wrap: wrap; align-items: center; }
+.bar .field { flex: 1 1 320px; }
+
+.layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: var(--s-200);
+  margin-top: var(--s-200); padding-bottom: var(--s-700); }
+aside.card {
+  padding: var(--s-100); align-self: start; position: sticky;
+  top: calc(var(--bar-h, 160px) + var(--s-300));
+  height: calc(100vh - var(--bar-h, 160px) - var(--s-500)); min-height: 320px;
+  display: flex; flex-direction: column; gap: var(--s-75);
+}
+.seg { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-50); padding: var(--s-50);
+  background: var(--surface-2); border-radius: var(--r-lg); }
+.seg button { font: inherit; border: 0; background: none; color: var(--text-secondary);
+  border-radius: var(--r-sm); padding: var(--s-50) var(--s-75); cursor: pointer;
+  display: inline-flex; gap: var(--s-50); align-items: center; justify-content: center;
+  transition: background-color 300ms var(--ease), color 300ms var(--ease); }
+.seg button[aria-selected="true"] { background: var(--surface-1); color: var(--text-primary);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08); }
+.side-body { flex: 1; min-height: 0; overflow-y: auto; }
+.side-body[hidden] { display: none; }
+#projects, .tree, .tree ul { list-style: none; margin: 0; padding: 0; }
+.tree ul { padding-left: var(--s-100); }
+.node { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center;
+  border-radius: var(--r-md); transition: background-color 300ms var(--ease); }
+.node:hover { background: var(--surface-2); }
+.node[aria-current="true"] { background: var(--accent-soft); }
+.node .caret { width: 24px; height: 28px; border: 0; background: none; color: var(--text-muted);
+  cursor: pointer; padding: 0; display: grid; place-items: center; border-radius: var(--r-sm); }
+.node .caret .icon { transition: transform 300ms var(--ease); }
+.node .caret[aria-expanded="true"] .icon { transform: rotate(90deg); }
+.node .go { font: inherit; text-align: left; border: 0; background: none; color: var(--text-primary);
+  cursor: pointer; padding: var(--s-50) 0; display: flex; gap: var(--s-75); align-items: center; min-width: 0; }
+.node .go span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node .go .icon { color: var(--text-muted); }
+.node .cnt { color: var(--text-muted); font-variant-numeric: tabular-nums; padding-right: var(--s-75); }
+#projects button {
+  width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 var(--s-75);
+  text-align: left; font: inherit; color: var(--text-primary); background: none; border: 0;
+  padding: var(--s-75); border-radius: var(--r-md); cursor: pointer;
+  transition: background-color 300ms var(--ease);
+}
+#projects button:hover { background: var(--surface-2); }
+#projects button[aria-current="true"] { background: var(--accent-soft); }
+#projects .pn { display: flex; gap: var(--s-50); align-items: center; min-width: 0; }
+#projects .pn span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#projects .pc { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+#projects .pp { grid-column: 1 / -1; color: var(--text-muted); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+
+.results { padding: 0; overflow: hidden; }
+.crumbs { display: flex; gap: var(--s-75); align-items: center; flex-wrap: wrap;
+  padding: var(--s-100) var(--s-200); border-bottom: 1px solid var(--line); }
+.crumbs .nav { display: flex; gap: var(--s-50); }
+.icon-btn { width: 32px; height: 32px; display: grid; place-items: center; padding: 0;
+  font: inherit; color: var(--text-secondary); background: var(--surface-1);
+  border: 1px solid var(--line); border-radius: var(--r-lg); cursor: pointer;
+  transition: background-color 300ms var(--ease), color 300ms var(--ease), transform 300ms var(--ease); }
+.icon-btn:hover:not(:disabled) { background: var(--surface-2); color: var(--text-primary); }
+.icon-btn:active:not(:disabled) { transform: scale(0.98); }
+.icon-btn:disabled { opacity: 0.4; cursor: default; }
+.trail { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-25) var(--s-50); min-width: 0; }
+.trail button { font: inherit; border: 0; background: none; color: var(--text-secondary); padding: var(--s-25) var(--s-50);
+  border-radius: var(--r-sm); cursor: pointer; transition: color 300ms var(--ease), background-color 300ms var(--ease); }
+.trail button:hover { color: var(--text-primary); background: var(--surface-2); }
+.trail button[aria-current="page"] { color: var(--text-primary); font-weight: 600; }
+.trail .sep { color: var(--text-muted); }
+.summary { padding: var(--s-100) var(--s-200); color: var(--text-secondary);
+  display: flex; justify-content: space-between; gap: var(--s-100); flex-wrap: wrap; }
+table { table-layout: fixed; }
+col.c-name { width: 40%; } col.c-where { width: 38%; } col.c-time { width: 11%; }
+col.c-size { width: 11%; }
+tbody tr { transition: background-color 300ms var(--ease); }
+tbody tr:hover { background: var(--surface-2); }
+tbody tr[aria-selected="true"] { background: var(--accent-soft); }
+tr.folder td { cursor: pointer; }
+.fname { display: flex; gap: var(--s-75); align-items: flex-start; }
+.fname .icon { margin-top: var(--s-25); color: var(--text-muted); }
+tr.folder .fname .icon { color: var(--accent); }
+.fname a, .fname button { font: inherit; color: var(--text-primary); text-decoration: none; word-break: break-all;
+  background: none; border: 0; padding: 0; text-align: left; cursor: pointer; }
+.fname a:hover, .fname button:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.acts { display: flex; flex-wrap: wrap; gap: var(--s-100); align-items: center;
+  margin: var(--s-50) 0 0 var(--s-300); color: var(--text-muted); }
+.err { color: var(--danger); }
+.where { word-break: break-all; color: var(--text-secondary); }
+.where button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
+  cursor: pointer; border-radius: var(--r-sm); transition: color 300ms var(--ease); }
+.where button:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.foot { display: flex; justify-content: center; padding: var(--s-200); }
+.foot:empty { display: none; }
+
+/* 뷰어 */
+.scrim { position: fixed; inset: 0; z-index: 30; background: rgb(0 0 0 / 0.32); opacity: 0;
+  pointer-events: none; transition: opacity 300ms var(--ease); }
+.scrim.open { opacity: 1; pointer-events: auto; }
+.viewer { position: fixed; z-index: 31; top: var(--s-100); right: var(--s-100); bottom: var(--s-100);
+  width: min(820px, calc(100vw - 24px)); background: var(--surface-1); border: 1px solid var(--line);
+  border-radius: var(--r-2xl); box-shadow: var(--shadow); display: flex; flex-direction: column;
+  transform: translateX(calc(100% + 24px)); opacity: 0; visibility: hidden;
+  transition: transform 500ms var(--ease), opacity 300ms var(--ease), visibility 0s linear 500ms; }
+.viewer.open { transform: none; opacity: 1; visibility: visible;
+  transition: transform 500ms var(--ease), opacity 300ms var(--ease), visibility 0s; }
+.v-head { padding: var(--s-200); border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: var(--s-75); }
+.v-title { display: flex; gap: var(--s-75); align-items: flex-start; }
+.v-title h2 { flex: 1; min-width: 0; word-break: break-all; }
+.v-title .icon { margin-top: var(--s-50); color: var(--text-muted); }
+.v-meta { color: var(--text-muted); display: flex; flex-wrap: wrap; gap: var(--s-50) var(--s-100); }
+.v-path { color: var(--text-secondary); word-break: break-all; }
+.v-acts { display: flex; flex-wrap: wrap; gap: var(--s-75); align-items: center; }
+.v-acts .spacer { flex: 1; }
+.v-body { flex: 1; min-height: 0; overflow: auto; padding: var(--s-300); }
+.v-body.flush { padding: 0; }
+.v-body iframe { width: 100%; height: 100%; border: 0; display: block; background: #fff; }
+.v-body pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: var(--mono);
+  font-size: 12px; line-height: 16px; }
+.notice { display: flex; gap: var(--s-100); align-items: flex-start; padding: var(--s-200);
+  border: 1px solid var(--line); border-radius: var(--r-xl); background: var(--surface-2); color: var(--text-secondary); }
+.notice .icon { width: 20px; height: 20px; color: var(--text-muted); }
+.notice + * { margin-top: var(--s-200); }
+.trunc { margin-top: var(--s-200); color: var(--text-muted); }
+.skeleton { display: flex; flex-direction: column; gap: var(--s-100); }
+.skeleton i { display: block; height: 12px; border-radius: var(--r-sm); background: var(--surface-2);
+  animation: pulse 1400ms var(--ease) infinite alternate; }
+@keyframes pulse { from { opacity: 1; } to { opacity: 0.4; } }
+.sheets { display: flex; gap: var(--s-50); flex-wrap: wrap; margin-bottom: var(--s-100); }
+.grid { overflow: auto; border: 1px solid var(--line); border-radius: var(--r-lg); max-height: 100%; }
+.grid table { table-layout: auto; }
+.grid td, .grid th { white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis;
+  font-size: 12px; line-height: 16px; padding: var(--s-50) var(--s-75); border-right: 1px solid var(--line); }
+.grid tr:first-child td { font-weight: 600; background: var(--surface-2); position: sticky; top: 0; }
+.slide { border: 1px solid var(--line); border-radius: var(--r-xl); padding: var(--s-200); }
+.slide + .slide { margin-top: var(--s-100); }
+.slide .caption-4 { color: var(--text-muted); margin-bottom: var(--s-75); }
+.slide p + p { margin-top: var(--s-50); }
+.cell + .cell { margin-top: var(--s-200); }
+.cell .caption-4 { color: var(--text-muted); margin-bottom: var(--s-50); }
+.cell pre.code { background: var(--surface-2); border-radius: var(--r-lg); padding: var(--s-100); }
+.cell pre.out { color: var(--text-secondary); padding: var(--s-75) var(--s-100); border-left: 2px solid var(--line); }
+.md { font-size: 16px; line-height: 24px; max-width: 720px; }
+.md > * + * { margin-top: var(--s-200); }
+.md h1 { font-size: 30px; line-height: 36px; font-weight: 600; }
+.md h2 { font-size: 24px; line-height: 32px; font-weight: 600; }
+.md h3 { font-size: 20px; line-height: 28px; font-weight: 600; }
+.md h4, .md h5, .md h6 { font-size: 16px; line-height: 24px; font-weight: 600; }
+.md em { font-style: normal; font-weight: 500; }
+.md a { color: var(--accent); }
+.md code { background: var(--surface-2); border-radius: var(--r-sm); padding: 0 var(--s-50); }
+.md pre { background: var(--surface-2); border-radius: var(--r-lg); padding: var(--s-100); overflow: auto; }
+.md pre code { background: none; padding: 0; }
+.md blockquote { margin: 0; padding-left: var(--s-200); border-left: 2px solid var(--line-strong); color: var(--text-secondary); }
+.md ul, .md ol { padding-left: var(--s-300); margin-bottom: 0; }
+.md li + li { margin-top: var(--s-50); }
+.md hr { border: 0; height: 1px; background: var(--line); }
+.md table { width: auto; font-size: 14px; line-height: 20px; }
+.md th, .md td { border: 1px solid var(--line); }
+
+.btn.danger, .link-btn.danger { color: var(--danger); }
+.btn.danger:hover { border-color: var(--danger); }
+dialog.confirm { border: 1px solid var(--line); border-radius: var(--r-2xl); padding: var(--s-300);
+  background: var(--surface-1); color: var(--text-primary); box-shadow: var(--shadow);
+  width: min(440px, calc(100vw - 32px)); }
+dialog.confirm::backdrop { background: rgb(0 0 0 / 0.4); }
+dialog.confirm p + p { margin-top: var(--s-75); color: var(--text-secondary); }
+dialog.confirm .name { word-break: break-all; }
+dialog.confirm .row { display: flex; gap: var(--s-75); justify-content: flex-end; margin-top: var(--s-300); }
+.btn.solid-danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+.btn.solid-danger:hover { background: var(--danger); border-color: var(--danger); opacity: 0.9; }
+.toast { position: fixed; z-index: 40; left: 50%; bottom: var(--s-300); max-width: calc(100vw - 32px);
+  display: flex; gap: var(--s-100); align-items: center; padding: var(--s-100) var(--s-100) var(--s-100) var(--s-200);
+  background: var(--text-primary); color: var(--bg); border-radius: var(--r-xl); box-shadow: var(--shadow);
+  transform: translate(-50%, var(--s-400)); opacity: 0; pointer-events: none;
+  transition: transform 500ms var(--ease), opacity 300ms var(--ease); }
+.toast.show { transform: translate(-50%, 0); opacity: 1; pointer-events: auto; }
+.toast .msg { word-break: break-all; }
+.toast button { font: inherit; font-weight: 600; color: var(--bg); background: none; border: 1px solid currentColor;
+  border-radius: var(--r-lg); padding: var(--s-50) var(--s-100); cursor: pointer; white-space: nowrap; opacity: 0.9; }
+.toast button:hover { opacity: 1; }
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  aside.card { position: static; height: 360px; }
+}
+@media (max-width: 640px) {
+  header.top { padding-top: var(--s-400); }
+  .bar { position: static; }
+  col.c-where, col.c-size, th.h-where, th.h-size, td.c-where, td.c-size { display: none; }
+  col.c-name { width: 70%; } col.c-time { width: 30%; }
+  .viewer { top: var(--s-75); right: var(--s-75); bottom: var(--s-75); width: calc(100vw - 16px); }
+  .v-body { padding: var(--s-200); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .viewer, .viewer.open { transform: none; }
+  .skeleton i { animation: none; }
+  .node .caret .icon { transition: none; }
+  .toast, .toast.show { transform: translate(-50%, 0); }
+}
+</style>
+</head>
+<body>
+<a class="skip button-sm" href="#results">결과로 건너뛰기</a>
+<div class="wrap">
+  <header class="top">
+    <div class="text">
+      <h1 class="page-title heading-4">문서·데이터 허브</h1>
+      <p class="page-sub body-3">흩어진 문서와 데이터를 옮기지 않고 한곳에서 찾습니다.</p>
+      <p class="meta-line caption-5" id="meta"></p>
+      <p class="mode caption-2" id="mode"></p>
+    </div>
+    <button class="btn button-sm" type="button" id="theme" aria-label="테마 바꾸기"></button>
+  </header>
+  <div class="kpis" id="kpis"></div>
+
+  <div class="bar floating" id="bar">
+    <div class="row">
+      <label class="field body-6">
+        <span class="icon" data-icon="magnifying-glass"></span>
+        <input type="search" id="q" placeholder="이름이나 경로로 찾기, 띄어 쓰면 모두 포함" aria-label="검색">
+      </label>
+      <select id="sort" class="body-6" aria-label="정렬">
+        <option value="mtime">최근 수정순</option>
+        <option value="name">이름순</option>
+        <option value="size">큰 파일순</option>
+      </select>
+      <select id="age" class="body-6" aria-label="수정 시기">
+        <option value="0">전체 기간</option>
+        <option value="7">최근 7일</option>
+        <option value="30">최근 30일</option>
+        <option value="365">최근 1년</option>
+      </select>
+      <button class="chip caption-2" type="button" id="hidden" aria-pressed="false">
+        <span class="icon" data-icon="eye-slash"></span>숨김 폴더 포함
+      </button>
+    </div>
+    <div class="row" id="kinds" role="group" aria-label="종류"></div>
+  </div>
+
+  <div class="layout">
+    <aside class="card" aria-label="폴더와 프로젝트">
+      <div class="seg caption-2" role="tablist">
+        <button type="button" role="tab" id="tab-folders" aria-selected="true"><span class="icon" data-icon="tree-structure"></span>폴더</button>
+        <button type="button" role="tab" id="tab-projects" aria-selected="false"><span class="icon" data-icon="squares-four"></span>프로젝트</button>
+      </div>
+      <div class="side-body" id="side-folders"><ul class="tree caption-2" id="tree"></ul></div>
+      <div class="side-body" id="side-projects" hidden>
+        <label class="field body-6">
+          <span class="icon" data-icon="magnifying-glass"></span>
+          <input type="search" id="pq" placeholder="프로젝트 찾기" aria-label="프로젝트 찾기">
+        </label>
+        <ul id="projects"></ul>
+      </div>
+    </aside>
+    <main class="card results" id="results" tabindex="-1">
+      <nav class="crumbs caption-2" aria-label="위치">
+        <div class="nav">
+          <button class="icon-btn" type="button" id="back" aria-label="뒤로" title="뒤로"></button>
+          <button class="icon-btn" type="button" id="up" aria-label="상위 폴더" title="상위 폴더"></button>
+        </div>
+        <div class="trail" id="trail"></div>
+      </nav>
+      <div class="summary caption-2" id="summary"></div>
+      <table>
+        <colgroup><col class="c-name"><col class="c-where"><col class="c-time"><col class="c-size"></colgroup>
+        <thead><tr><th>이름</th><th class="h-where">위치</th><th class="num">수정</th><th class="num h-size">크기</th></tr></thead>
+        <tbody id="tbody" class="body-6"></tbody>
+      </table>
+      <div class="foot" id="foot"></div>
+    </main>
+  </div>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<section class="viewer" id="viewer" role="dialog" aria-modal="true" aria-labelledby="v-name">
+  <div class="v-head">
+    <div class="v-title">
+      <span id="v-icon"></span>
+      <h2 class="title-2" id="v-name"></h2>
+      <button class="icon-btn" type="button" id="v-prev" aria-label="이전 파일" title="이전 파일 (k)"></button>
+      <button class="icon-btn" type="button" id="v-next" aria-label="다음 파일" title="다음 파일 (j)"></button>
+      <button class="icon-btn" type="button" id="v-close" aria-label="닫기" title="닫기 (Esc)"></button>
+    </div>
+    <div class="v-meta caption-5" id="v-meta"></div>
+    <div class="v-path mono" id="v-path"></div>
+    <div class="v-acts" id="v-acts"></div>
+  </div>
+  <div class="v-body" id="v-body"></div>
+</section>
+
+<dialog class="confirm" id="confirm" aria-labelledby="c-title">
+  <h2 class="title-2" id="c-title">이 파일을 삭제할까요?</h2>
+  <p class="body-6 name" id="c-name"></p>
+  <p class="caption-2">바로 지우지 않고 격리 폴더(~/.fsledger/quarantine)로 옮깁니다. 알림의 되돌리기나
+    fsledger undo 로 복구할 수 있고, fsledger purge 를 실행하기 전까지 남아 있습니다.</p>
+  <div class="row">
+    <button class="btn button-sm" type="button" id="c-cancel">취소</button>
+    <button class="btn button-sm solid-danger" type="button" id="c-ok"></button>
+  </div>
+</dialog>
+<div class="toast caption-2" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const DATA = /*__DATA__*/null;
+const ICONS = /*__ICONS__*/null;
+const PAGE = 200;
+const SERVED = location.protocol.startsWith("http");
+const TOKEN = new URLSearchParams(location.search).get("t") || "";
+const KIND_ICON = ["file-text", "presentation-chart", "table", "note", "database", "notebook", "flow-arrow"];
+const $ = (id) => document.getElementById(id);
+const HOME = DATA.home;
+const tilde = (p) => (p === HOME || p.startsWith(HOME + "/")) ? "~" + p.slice(HOME.length) : p;
+const fileUrl = (p) => "file://" + p.split("/").map(encodeURIComponent).join("/");
+const parentOf = (p) => p.slice(0, p.lastIndexOf("/"));
+const fmtBytes = (n) => {
+  for (const u of ["B", "KB", "MB", "GB"]) {
+    if (n < 1024) return u === "B" ? `${n} B` : `${n.toFixed(1)} ${u}`;
+    n /= 1024;
+  }
+  return `${n.toFixed(1)} TB`;
+};
+const NOW = Date.now() / 1000;
+const fmtTime = (t) => {
+  const d = new Date(t * 1000), days = (NOW - t) / 86400;
+  if (days < 1) return d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+  if (days < 300) return `${d.getMonth() + 1}월 ${d.getDate()}일`;
+  return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}`;
+};
+const el = (tag, props = {}, ...kids) => {
+  const e = document.createElement(tag);
+  Object.assign(e, props);
+  for (const k of kids) if (k != null) e.append(k);
+  return e;
+};
+const icon = (name) => {
+  const s = el("span", { className: "icon" });
+  s.setAttribute("aria-hidden", "true");
+  s.innerHTML = `<svg viewBox="0 0 256 256" fill="currentColor">${ICONS[name] || ""}</svg>`;
+  return s;
+};
+document.querySelectorAll("[data-icon]").forEach((s) => s.replaceWith(icon(s.dataset.icon)));
+$("back").append(icon("arrow-left")); $("up").append(icon("arrow-up"));
+$("v-prev").append(icon("caret-up")); $("v-next").append(icon("caret-down")); $("v-close").append(icon("x"));
+
+// ---- 테마 ---------------------------------------------------------------
+function setThemeIcon() {
+  const dark = (document.documentElement.dataset.theme ||
+    (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark";
+  $("theme").replaceChildren(icon(dark ? "sun" : "moon"));
+}
+$("theme").onclick = () => {
+  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  const cur = document.documentElement.dataset.theme || (dark ? "dark" : "light");
+  document.documentElement.dataset.theme = cur === "dark" ? "light" : "dark";
+  setThemeIcon();
+};
+setThemeIcon();
+
+// ---- 데이터 펼치기 -------------------------------------------------------
+// 행: [dir, name, kind, project, size, mtime, flags]
+const ROOTS = DATA.roots.slice().sort((a, b) => b.path.length - a.path.length);
+const ROOT_LABEL = new Map(DATA.roots.map((r) => [r.path, r.label]));
+const rootOf = (p) => ROOTS.find((r) => p === r.path || p.startsWith(r.path + "/"));
+// 폴더 번호마다 루트부터 그 폴더까지의 경로 사슬
+const CHAIN = DATA.dirs.map((d) => {
+  const r = rootOf(d);
+  if (!r) return [d];
+  const out = [r.path];
+  let acc = r.path;
+  for (const part of d.slice(r.path.length + 1).split("/").filter(Boolean)) { acc += "/" + part; out.push(acc); }
+  return out;
+});
+const CHILDREN = new Map();
+for (const chain of CHAIN) for (let i = 1; i < chain.length; i++) {
+  if (!CHILDREN.has(chain[i - 1])) CHILDREN.set(chain[i - 1], new Set());
+  CHILDREN.get(chain[i - 1]).add(chain[i]);
+}
+const ROWS = DATA.rows.map((r) => {
+  const dir = DATA.dirs[r[0]];
+  return { did: r[0], dir, name: r[1], kind: r[2], pid: r[3], size: r[4], mtime: r[5],
+    cloud: !!(r[6] & 1), hidden: !!(r[6] & 2),
+    path: dir + "/" + r[1], hay: (tilde(dir) + "/" + r[1]).toLowerCase() };
+});
+const BY_PATH = new Map(ROWS.map((r) => [r.path, r]));
+const labelOf = (p) => ROOT_LABEL.get(p) || p.slice(p.lastIndexOf("/") + 1);
+
+// ---- 상태와 주소 ----------------------------------------------------------
+// 화면 상태는 주소 #… 에 담아 뒤로가기·새로고침·링크 공유가 그대로 되게 한다.
+const DEFAULTS = { q: "", kind: -1, dir: "", sort: "mtime", age: 0, view: "" };
+const state = { ...DEFAULTS, hidden: false, side: "folders", shown: PAGE };
+try {
+  state.hidden = localStorage.getItem("hub.hidden") === "1";
+  state.side = localStorage.getItem("hub.side") || "folders";
+} catch (e) {}
+const expanded = new Set();
+
+function toHash(s) {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(DEFAULTS)) if (s[k] !== v) p.set(k, s[k]);
+  const h = p.toString();
+  return h ? "#" + h : location.pathname + location.search;
+}
+function fromHash() {
+  const p = new URLSearchParams(location.hash.slice(1));
+  state.q = p.get("q") || "";
+  state.kind = Number(p.get("kind") ?? -1);
+  state.dir = p.get("dir") || "";
+  state.sort = p.get("sort") || "mtime";
+  state.age = Number(p.get("age") || 0);
+  state.view = p.get("view") || "";
+}
+function navigate(changes, { push = true } = {}) {
+  const before = toHash(state);
+  Object.assign(state, changes);
+  if (!("shown" in changes)) state.shown = PAGE;
+  const after = toHash(state);
+  if (after !== before) {
+    const depth = (history.state && history.state.depth) || 0;
+    if (push) history.pushState({ depth: depth + 1 }, "", after);
+    else history.replaceState({ depth }, "", after);
+  }
+  render();
+}
+window.addEventListener("popstate", () => { fromHash(); syncControls(); render(); });
+window.addEventListener("hashchange", () => { fromHash(); syncControls(); render(); });
+
+function syncControls() {
+  $("q").value = state.q; $("sort").value = state.sort; $("age").value = String(state.age);
+}
+
+// ---- 거르기 --------------------------------------------------------------
+function filtered({ useDir = true } = {}) {
+  const cutoff = state.age ? NOW - state.age * 86400 : 0;
+  const terms = state.q.toLowerCase().split(/\s+/).filter(Boolean);
+  return ROWS.filter((r) =>
+    (state.hidden || !r.hidden) && r.mtime >= cutoff &&
+    (state.kind < 0 || r.kind === state.kind) &&
+    (!useDir || !state.dir || r.path.startsWith(state.dir + "/")) &&
+    terms.every((t) => r.hay.includes(t)));
+}
+const folderMode = () => !!state.dir && !state.q;
+
+// ---- 머리말 --------------------------------------------------------------
+function renderHeader() {
+  const vis = ROWS.filter((r) => !r.hidden);
+  const recent = vis.filter((r) => NOW - r.mtime < 7 * 86400).length;
+  const cloud = vis.filter((r) => r.cloud).length;
+  const gen = new Date(DATA.generated_at * 1000).toLocaleString("ko-KR");
+  $("meta").textContent = `${gen} 갱신 · ` + DATA.roots.map((r) => r.label).join(", ");
+  $("mode").replaceChildren(icon(SERVED ? "eye" : "warning"), SERVED
+    ? "미리보기와 앱에서 열기를 쓸 수 있습니다."
+    : "파일로 연 페이지라 미리보기가 꺼져 있습니다. 터미널에서 fsledger serve 로 열면 켜집니다.");
+  const kpis = [
+    ["문서·데이터", vis.length.toLocaleString() + "개"],
+    ["전체 크기", fmtBytes(vis.reduce((s, r) => s + r.size, 0))],
+    ["프로젝트·폴더", DATA.projects.filter((p) => p.n).length.toLocaleString() + "곳"],
+    ["최근 7일 수정", recent.toLocaleString() + "개"],
+  ];
+  if (cloud) kpis.push(["iCloud에만 있음", cloud.toLocaleString() + "개"]);
+  $("kpis").replaceChildren(...kpis.map(([l, v]) =>
+    el("div", { className: "kpi" }, el("div", { className: "label caption-2", textContent: l }),
+      el("div", { className: "value heading-5", textContent: v }))));
+}
+
+function renderKinds() {
+  const pool = (() => { const k = state.kind; state.kind = -1; const p = filtered(); state.kind = k; return p; })();
+  const n = DATA.kinds.map(() => 0);
+  for (const r of pool) n[r.kind]++;
+  const chip = (label, idx, count) => {
+    const b = el("button", { className: "chip caption-2", type: "button" },
+      idx >= 0 ? icon(KIND_ICON[idx]) : null, label,
+      el("span", { className: "n", textContent: count.toLocaleString() }));
+    b.setAttribute("aria-pressed", String(state.kind === idx));
+    b.onclick = () => navigate({ kind: state.kind === idx && idx >= 0 ? -1 : idx }, { push: false });
+    return b;
+  };
+  $("kinds").replaceChildren(chip("전체", -1, pool.length),
+    ...DATA.kinds.map((k, i) => n[i] ? chip(k, i, n[i]) : null).filter(Boolean));
+}
+
+// ---- 옆 목록: 폴더 트리 · 프로젝트 ----------------------------------------
+function folderCounts() {
+  const counts = new Map();
+  for (const r of filtered({ useDir: false })) for (const p of CHAIN[r.did]) counts.set(p, (counts.get(p) || 0) + 1);
+  return counts;
+}
+function renderTree(counts) {
+  if (state.dir) { let p = state.dir; while (p && !ROOT_LABEL.has(p)) { p = parentOf(p); expanded.add(p); } }
+  const node = (path, depth) => {
+    const kids = [...(CHILDREN.get(path) || [])].filter((c) => counts.get(c))
+      .sort((a, b) => labelOf(a).localeCompare(labelOf(b), "ko"));
+    const open = expanded.has(path);
+    const row = el("div", { className: "node" });
+    row.setAttribute("aria-current", String(state.dir === path));
+    const caret = el("button", { className: "caret", type: "button", title: open ? "접기" : "펼치기" });
+    caret.setAttribute("aria-expanded", String(open));
+    caret.setAttribute("aria-label", `${labelOf(path)} ${open ? "접기" : "펼치기"}`);
+    if (kids.length) {
+      caret.append(icon("caret-right"));
+      caret.onclick = () => { open ? expanded.delete(path) : expanded.add(path); renderSide(); };
+    } else caret.disabled = true;
+    const go = el("button", { className: "go", type: "button", title: tilde(path) },
+      icon(depth === 0 ? "house" : "folder"), el("span", { textContent: labelOf(path) }));
+    go.onclick = () => { expanded.add(path); navigate({ dir: path, q: "" }); syncControls(); };
+    row.append(caret, go, el("span", { className: "cnt caption-5", textContent: (counts.get(path) || 0).toLocaleString() }));
+    const li = el("li", {}, row);
+    if (open && kids.length) li.append(el("ul", {}, ...kids.slice(0, 500).map((k) => node(k, depth + 1))));
+    return li;
+  };
+  const roots = DATA.roots.filter((r) => counts.get(r.path));
+  $("tree").replaceChildren(...(roots.length ? roots.map((r) => node(r.path, 0))
+    : [el("li", { className: "caption-2", textContent: "조건에 맞는 폴더가 없습니다." })]));
+}
+function renderProjects() {
+  const n = new Map();
+  for (const r of filtered({ useDir: false })) n.set(r.pid, (n.get(r.pid) || 0) + 1);
+  const pq = $("pq").value.trim().toLowerCase();
+  const items = [...n.entries()]
+    .map(([pid, c]) => ({ c, p: DATA.projects[pid] }))
+    .filter((x) => !pq || (x.p.name + " " + x.p.path).toLowerCase().includes(pq))
+    .sort((a, b) => b.c - a.c);
+  if (!items.length) {
+    $("projects").replaceChildren(el("li", { className: "caption-2", textContent: "맞는 프로젝트가 없습니다." }));
+    return;
+  }
+  $("projects").replaceChildren(...items.slice(0, 400).map(({ c, p }) => {
+    const name = el("span", { className: "pn body-5" }, el("span", { textContent: p.name }));
+    if (p.repo) name.append(el("span", { className: "badge" }, icon("git-branch"), "git"));
+    const b = el("button", { type: "button", title: tilde(p.path) }, name,
+      el("span", { className: "pc caption-5", textContent: c.toLocaleString() }),
+      el("span", { className: "pp caption-5", textContent: "‎" + tilde(p.path) }));
+    b.setAttribute("aria-current", String(state.dir === p.path));
+    b.onclick = () => { navigate({ dir: p.path, q: "" }); syncControls(); };
+    return el("li", {}, b);
+  }));
+}
+function renderSide() {
+  const folders = state.side === "folders";
+  $("tab-folders").setAttribute("aria-selected", String(folders));
+  $("tab-projects").setAttribute("aria-selected", String(!folders));
+  $("side-folders").hidden = !folders; $("side-projects").hidden = folders;
+  if (folders) renderTree(folderCounts()); else renderProjects();
+}
+const setSide = (side) => { state.side = side; try { localStorage.setItem("hub.side", side); } catch (e) {} renderSide(); };
+$("tab-folders").onclick = () => setSide("folders");
+$("tab-projects").onclick = () => setSide("projects");
+$("pq").addEventListener("input", renderProjects);
+
+// ---- 위치 표시 (breadcrumb) ----------------------------------------------
+function renderCrumbs() {
+  $("back").disabled = !((history.state && history.state.depth) > 0);
+  $("up").disabled = !state.dir;
+  const trail = $("trail");
+  trail.replaceChildren();
+  const add = (label, dir, current) => {
+    if (trail.childNodes.length) trail.append(el("span", { className: "sep", textContent: "/" }));
+    const b = el("button", { type: "button", textContent: label });
+    if (current) b.setAttribute("aria-current", "page");
+    b.onclick = () => navigate({ dir });
+    trail.append(b);
+  };
+  add("전체", "", !state.dir);
+  if (state.dir) {
+    const r = rootOf(state.dir);
+    if (r) {
+      add(r.label, r.path, state.dir === r.path);
+      let acc = r.path;
+      for (const part of state.dir.slice(r.path.length + 1).split("/").filter(Boolean)) {
+        acc += "/" + part; add(part, acc, acc === state.dir);
+      }
+    } else add(tilde(state.dir), state.dir, true);
+  }
+}
+$("back").onclick = () => history.back();
+$("up").onclick = () => {
+  const r = rootOf(state.dir);
+  navigate({ dir: r && state.dir === r.path ? "" : parentOf(state.dir) });
+};
+
+// ---- 결과 목록 ------------------------------------------------------------
+let LIST = [];
+const SORTS = {
+  mtime: (a, b) => b.mtime - a.mtime,
+  size: (a, b) => b.size - a.size,
+  name: (a, b) => a.name.localeCompare(b.name, "ko"),
+};
+
+function whereCell(r) {
+  const rel = tilde(r.dir);
+  const box = el("div", { className: "where mono" });
+  let acc = rel.startsWith("~") ? HOME : "";
+  rel.split("/").forEach((part, i) => {
+    if (i > 0) { acc += "/" + part; box.append("/"); }
+    if (!part) return;
+    const target = acc;
+    const b = el("button", { type: "button", textContent: part, title: "이 폴더로 가기" });
+    b.onclick = () => { navigate({ dir: target, q: "" }); syncControls(); };
+    box.append(b);
+  });
+  return box;
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { ...opts, headers: { "X-Fsledger-Token": TOKEN, ...(opts.headers || {}) } });
+  if (!res.ok) {
+    let msg = res.status === 404 ? "이 파일은 열 수 없습니다. 다시 스캔한 뒤 시도하세요" : `서버 오류 (${res.status})`;
+    if (res.status !== 404) { try { msg = (await res.json()).error || msg; } catch (e) {} }
+    throw new Error(msg);
+  }
+  return res.json();
+}
+async function openInApp(path, reveal, btn) {
+  try {
+    await api("/api/open", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, reveal }) });
+  } catch (e) { flash(btn, e.message, false); }
+}
+function flash(btn, msg, ok) {
+  const keep = [...btn.childNodes];
+  btn.replaceChildren(icon(ok ? "check" : "x"), el("span", { className: ok ? "" : "err", textContent: msg }));
+  setTimeout(() => btn.replaceChildren(...keep), 1800);
+}
+function copyPath(text, btn) {
+  const fallback = () => {
+    const t = el("textarea", { value: text });
+    document.body.append(t); t.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) {}
+    t.remove();
+    flash(btn, ok ? "복사했습니다" : "복사하지 못했습니다. 경로를 직접 선택하세요", ok);
+  };
+  if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => flash(btn, "복사했습니다", true), fallback);
+  else fallback();
+}
+function actionLinks(r, { compact = false } = {}) {
+  const out = [];
+  const cls = compact ? "link-btn" : "btn button-sm";
+  if (SERVED) {
+    if (!compact) {
+      const open = el("button", { className: cls, type: "button" }, icon("arrow-square-out"), "앱에서 열기");
+      open.onclick = () => openInApp(r.path, false, open);
+      out.push(open);
+    }
+    const reveal = el("button", { className: cls, type: "button" }, icon("folder-open"), "Finder에서 보기");
+    reveal.onclick = () => openInApp(r.path, true, reveal);
+    out.push(reveal);
+  } else {
+    if (!compact) out.push(el("a", { className: cls, href: fileUrl(r.path), target: "_blank" }, icon("arrow-square-out"), "파일 열기"));
+    out.push(el("a", { className: cls, href: fileUrl(r.dir), target: "_blank" }, icon("folder-open"), "폴더 열기"));
+  }
+  const cp = el("button", { className: cls, type: "button" }, icon("copy"), el("span", { textContent: "경로 복사" }));
+  cp.onclick = () => copyPath(r.path, cp);
+  out.push(cp);
+  if (SERVED) {
+    const del = el("button", { className: cls + " danger", type: "button" }, icon("trash"), "삭제");
+    del.onclick = () => confirmDelete(r, del);
+    out.push(del);
+  }
+  return out;
+}
+
+function fileRow(r) {
+  const link = el("a", { href: toHash({ ...state, view: r.path }), textContent: r.name,
+    title: r.cloud ? "iCloud에만 있는 파일입니다" : "미리보기" });
+  link.onclick = (e) => { if (e.metaKey || e.ctrlKey) return; e.preventDefault(); openViewer(r.path, link); };
+  const acts = el("div", { className: "acts caption-5" }, el("span", { textContent: DATA.kinds[r.kind] }));
+  if (r.cloud) acts.append(el("span", { className: "badge" }, icon("cloud"), "iCloud"));
+  if (r.hidden) acts.append(el("span", { className: "badge" }, icon("eye-slash"), "숨김 폴더"));
+  acts.append(...actionLinks(r, { compact: true }));
+  const tr = el("tr", {},
+    el("td", {}, el("div", { className: "fname title-4" }, icon(KIND_ICON[r.kind]), link), acts),
+    el("td", { className: "c-where" }, whereCell(r)),
+    el("td", { className: "num", textContent: fmtTime(r.mtime), title: new Date(r.mtime * 1000).toLocaleString("ko-KR") }),
+    el("td", { className: "num c-size", textContent: fmtBytes(r.size) }));
+  tr.dataset.path = r.path;
+  tr.setAttribute("aria-selected", String(state.view === r.path));
+  return tr;
+}
+function folderRow(path, count) {
+  const go = el("button", { type: "button", textContent: labelOf(path) });
+  const tr = el("tr", { className: "folder" },
+    el("td", {}, el("div", { className: "fname title-4" }, icon("folder"), go)),
+    el("td", { className: "c-where caption-5", textContent: "폴더" }),
+    el("td", { className: "num caption-5", textContent: `${count.toLocaleString()}개` }),
+    el("td", { className: "num c-size" }));
+  tr.onclick = () => { expanded.add(path); navigate({ dir: path }); };
+  return tr;
+}
+
+function renderList() {
+  const pool = filtered().sort(SORTS[state.sort]);
+  let folders = [];
+  if (folderMode()) {
+    const counts = new Map();
+    for (const r of pool) {
+      const chain = CHAIN[r.did], i = chain.indexOf(state.dir);
+      if (i >= 0 && i + 1 < chain.length) counts.set(chain[i + 1], (counts.get(chain[i + 1]) || 0) + 1);
+    }
+    folders = [...counts.entries()].sort((a, b) => labelOf(a[0]).localeCompare(labelOf(b[0]), "ko"));
+    LIST = pool.filter((r) => r.dir === state.dir);
+  } else LIST = pool;
+  const bytes = pool.reduce((s, r) => s + r.size, 0);
+  const scope = folderMode() ? `하위 폴더 ${folders.length.toLocaleString()}개 · 이 폴더의 파일 ${LIST.length.toLocaleString()}개` : `${LIST.length.toLocaleString()}개`;
+  $("summary").replaceChildren(...[
+    el("span", { textContent: `${scope} · 전체 ${fmtBytes(bytes)}` }),
+    LIST.length > state.shown ? el("span", { className: "caption-5", textContent: `위에서 ${state.shown.toLocaleString()}개 표시` }) : null,
+  ].filter(Boolean));
+  $("tbody").replaceChildren(...folders.map(([p, c]) => folderRow(p, c)), ...LIST.slice(0, state.shown).map(fileRow));
+  const foot = $("foot");
+  foot.replaceChildren();
+  if (!LIST.length && !folders.length) {
+    const reset = el("button", { className: "btn button-sm", type: "button" }, icon("arrow-counter-clockwise"), "필터 모두 해제");
+    reset.onclick = () => { navigate({ ...DEFAULTS, dir: state.dir }); syncControls(); };
+    foot.append(el("div", { className: "empty-state" }, icon("funnel-x"),
+      el("p", { className: "title-3", textContent: "조건에 맞는 파일이 없습니다" }),
+      el("p", { className: "caption-2", textContent: "검색어를 줄이거나 종류, 기간 필터를 풀어 보세요." }),
+      reset));
+  } else if (LIST.length > state.shown) {
+    const b = el("button", { className: "btn button-sm", type: "button",
+      textContent: `${Math.min(PAGE, LIST.length - state.shown).toLocaleString()}개 더 보기` });
+    b.onclick = () => { state.shown += PAGE; renderList(); };
+    foot.append(b);
+  }
+}
+
+// ---- 뷰어 ---------------------------------------------------------------
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+function mdInline(s) {
+  // s 는 이미 이스케이프된 문자열. 링크는 http(s)·mailto·# 만 살린다.
+  const codes = [];
+  s = s.replace(/`([^`]+)`/g, (_, c) => { codes.push(c); return `\u0000${codes.length - 1}\u0000`; });
+  // 이미지는 괄호 없는 자리표시로 바꿔 두어야 [![배지](…)](링크) 같은 중첩 링크가 풀린다.
+  const imgs = [];
+  s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)[^)]*\)/g, (_, alt) => { imgs.push(alt); return `\u0001${imgs.length - 1}\u0001`; });
+  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)[^)]*\)/g, (m, t, u) =>
+    /^(https?:|mailto:|#)/i.test(u) ? `<a href="${u}" target="_blank" rel="noopener noreferrer">${t}</a>` : t);
+  s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/__([^_]+)__/g, "<strong>$1</strong>");
+  s = s.replace(/(^|[^*])\*([^*\s][^*]*)\*/g, "$1<em>$2</em>");
+  s = s.replace(/\u0001(\d+)\u0001/g, (_, i) => `<span class="badge">이미지${imgs[i] ? " " + imgs[i] : ""}</span>`);
+  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[i]}</code>`);
+}
+function markdown(src) {
+  const lines = esc(src.replace(/\r\n?/g, "\n")).split("\n");
+  const out = [];
+  let i = 0;
+  const isBlockStart = (l) => /^(#{1,6}\s|```|&gt;|\s*([-*+]|\d+\.)\s|\|)/.test(l) || /^(-{3,}|\*{3,})\s*$/.test(l);
+  while (i < lines.length) {
+    const l = lines[i];
+    if (/^```/.test(l)) {
+      const buf = []; i++;
+      while (i < lines.length && !/^```/.test(lines[i])) buf.push(lines[i++]);
+      i++; out.push(`<pre><code>${buf.join("\n")}</code></pre>`); continue;
+    }
+    const h = l.match(/^(#{1,6})\s+(.*)$/);
+    if (h) { out.push(`<h${h[1].length}>${mdInline(h[2])}</h${h[1].length}>`); i++; continue; }
+    if (/^(-{3,}|\*{3,})\s*$/.test(l)) { out.push("<hr>"); i++; continue; }
+    if (/^&gt;/.test(l)) {
+      const buf = [];
+      while (i < lines.length && /^&gt;/.test(lines[i])) buf.push(lines[i++].replace(/^&gt;\s?/, ""));
+      out.push(`<blockquote>${mdInline(buf.join(" "))}</blockquote>`); continue;
+    }
+    if (/^\|/.test(l) && i + 1 < lines.length && /^\|?\s*:?-{2,}/.test(lines[i + 1])) {
+      const cells = (row) => row.replace(/^\||\|\s*$/g, "").split("|").map((c) => mdInline(c.trim()));
+      const head = cells(l); i += 2;
+      const body = [];
+      while (i < lines.length && /^\|/.test(lines[i])) body.push(cells(lines[i++]));
+      out.push(`<table><tr>${head.map((c) => `<th>${c}</th>`).join("")}</tr>${body.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("")}</table>`);
+      continue;
+    }
+    const li = l.match(/^\s*([-*+]|\d+\.)\s+(.*)$/);
+    if (li) {
+      const ordered = /\d/.test(li[1]), buf = [];
+      const items = [];
+      while (i < lines.length) {
+        const m = lines[i].match(/^\s*([-*+]|\d+\.)\s+(.*)$/);
+        if (m) { items.push(m[2]); i++; continue; }
+        // 들여쓴 줄은 앞 항목이 이어지는 것이다.
+        if (items.length && /^\s{2,}\S/.test(lines[i])) { items[items.length - 1] += " " + lines[i].trim(); i++; continue; }
+        break;
+      }
+      for (const it of items) buf.push(`<li>${mdInline(it.replace(/^\[( |x)\]\s*/i, (_, x) => x.trim() ? "☑ " : "☐ "))}</li>`);
+      out.push(ordered ? `<ol>${buf.join("")}</ol>` : `<ul>${buf.join("")}</ul>`); continue;
+    }
+    if (!l.trim()) { i++; continue; }
+    const buf = [];
+    while (i < lines.length && lines[i].trim() && !isBlockStart(lines[i])) buf.push(lines[i++]);
+    if (!buf.length) buf.push(lines[i++]);
+    out.push(`<p>${mdInline(buf.join(" "))}</p>`);
+  }
+  return out.join("\n");
+}
+
+const notice = (name, msg) => el("div", { className: "notice caption-2" }, icon(name), el("p", { textContent: msg }));
+const skeleton = () => el("div", { className: "skeleton" },
+  ...[92, 78, 85, 60, 88, 72, 40].map((w) => { const i = el("i"); i.style.width = w + "%"; return i; }));
+
+function gridTable(rows) {
+  const t = el("table");
+  for (const row of rows) t.append(el("tr", {}, ...row.map((c) => el("td", { textContent: c, title: c }))));
+  return el("div", { className: "grid" }, t);
+}
+function renderPreview(r, data) {
+  const body = $("v-body");
+  body.classList.remove("flush");
+  body.replaceChildren();
+  const trunc = (yes) => yes ? el("p", { className: "trunc caption-5", textContent: "파일이 커서 앞부분만 보여 줍니다. 전체는 앱에서 여세요." }) : "";
+  switch (data.type) {
+    case "cloud":
+      body.append(notice("cloud", "iCloud에만 있는 파일이라 미리보기 하지 않았습니다. 앱에서 열면 내려받습니다.")); break;
+    case "inline": {
+      body.classList.add("flush");
+      body.append(el("iframe", { src: `/api/raw?path=${encodeURIComponent(r.path)}&t=${encodeURIComponent(TOKEN)}`, title: r.name }));
+      break;
+    }
+    case "markdown": {
+      const box = el("div", { className: "md" });
+      box.innerHTML = markdown(data.text);
+      body.append(box, trunc(data.truncated)); break;
+    }
+    case "text": body.append(el("pre", { textContent: data.text }), trunc(data.truncated)); break;
+    case "table": {
+      const tabs = el("div", { className: "sheets" });
+      const holder = el("div");
+      const show = (i) => {
+        tabs.querySelectorAll("button").forEach((b, j) => b.setAttribute("aria-pressed", String(i === j)));
+        holder.replaceChildren(data.sheets[i] ? gridTable(data.sheets[i].rows) : notice("warning", "시트가 비어 있습니다."));
+      };
+      if (data.sheets.length > 1) data.sheets.forEach((s, i) => {
+        const b = el("button", { className: "chip caption-2", type: "button", textContent: s.name });
+        b.onclick = () => show(i); tabs.append(b);
+      });
+      body.append(tabs, holder, trunc(data.truncated)); show(0); break;
+    }
+    case "html": {
+      body.classList.add("flush");
+      const f = el("iframe", { title: r.name });
+      f.setAttribute("sandbox", "");  // 스크립트·같은 출처 접근 모두 막는다
+      f.srcdoc = data.html;
+      body.append(f); break;
+    }
+    case "slides":
+      body.append(...(data.slides.length ? data.slides.map((s) => el("div", { className: "slide" },
+        el("div", { className: "caption-4", textContent: `슬라이드 ${s.n}` }),
+        ...(s.lines.length ? s.lines.map((t) => el("p", { className: "body-6", textContent: t })) : [el("p", { className: "caption-5", textContent: "글자 없음" })])))
+        : [notice("warning", "슬라이드를 찾지 못했습니다.")])); break;
+    case "notebook":
+      body.append(...data.cells.map((c, i) => {
+        const cell = el("div", { className: "cell" }, el("div", { className: "caption-4", textContent: c.kind === "markdown" ? "마크다운" : `코드 [${i + 1}]` }));
+        if (c.kind === "markdown") { const m = el("div", { className: "md" }); m.innerHTML = markdown(c.source); cell.append(m); }
+        else cell.append(el("pre", { className: "code", textContent: c.source }), ...c.outputs.map((o) => el("pre", { className: "out", textContent: o })));
+        return cell;
+      })); break;
+    case "error": body.append(notice("warning", data.message)); break;
+    default:
+      body.append(notice("file", "이 형식은 미리보기를 지원하지 않습니다. 앱에서 열어 보세요."));
+  }
+}
+
+let seq = 0, lastFocus = null;
+function openViewer(path, from) { lastFocus = from || document.activeElement; navigate({ view: path }); }
+function closeViewer() {
+  if (history.state && history.state.depth > 0 && history.state.viewer) history.back();
+  else navigate({ view: "" }, { push: false });
+}
+function step(delta) {
+  const i = LIST.findIndex((r) => r.path === state.view);
+  const next = LIST[i + delta];
+  if (next) { navigate({ view: next.path }, { push: false }); history.replaceState({ ...history.state, viewer: true }, ""); }
+}
+function renderViewer() {
+  const v = $("viewer"), open = !!state.view;
+  const r = open ? BY_PATH.get(state.view) : null;
+  if (open && history.state && !history.state.viewer && history.state.depth > 0) {
+    history.replaceState({ ...history.state, viewer: true }, "");
+  }
+  v.classList.toggle("open", !!r); $("scrim").classList.toggle("open", !!r);
+  document.querySelectorAll("#tbody tr[data-path]").forEach((tr) => tr.setAttribute("aria-selected", String(tr.dataset.path === state.view)));
+  if (!r) {
+    if (open) navigate({ view: "" }, { push: false });
+    if (lastFocus && document.contains(lastFocus)) { lastFocus.focus(); lastFocus = null; }
+    return;
+  }
+  if (v.dataset.path === r.path) return;
+  v.dataset.path = r.path;
+  $("v-icon").replaceChildren(icon(KIND_ICON[r.kind]));
+  $("v-name").textContent = r.name;
+  $("v-meta").replaceChildren(
+    el("span", { textContent: DATA.kinds[r.kind] }), el("span", { textContent: fmtBytes(r.size) }),
+    el("span", { textContent: new Date(r.mtime * 1000).toLocaleString("ko-KR") + " 수정" }),
+    ...(r.cloud ? [el("span", { className: "badge" }, icon("cloud"), "iCloud")] : []));
+  $("v-path").textContent = tilde(r.path);
+  $("v-acts").replaceChildren(...actionLinks(r));
+  const i = LIST.findIndex((x) => x.path === r.path);
+  $("v-prev").disabled = i <= 0; $("v-next").disabled = i < 0 || i >= LIST.length - 1;
+  $("v-close").focus({ preventScroll: true });
+  const body = $("v-body");
+  body.classList.remove("flush");
+  if (!SERVED) {
+    body.replaceChildren(notice("warning", "파일로 연 페이지에서는 브라우저가 다른 파일을 읽지 못하게 막습니다. 터미널에서 fsledger serve 를 실행해 열면 여기서 바로 미리 볼 수 있습니다."));
+    if (r.kind === 0 && /\.pdf$/i.test(r.name)) {
+      body.classList.add("flush");
+      body.replaceChildren(el("iframe", { src: fileUrl(r.path), title: r.name }));
+    }
+    return;
+  }
+  const my = ++seq;
+  body.replaceChildren(skeleton());
+  api(`/api/preview?path=${encodeURIComponent(r.path)}`)
+    .then((data) => { if (my === seq) renderPreview(r, data); })
+    .catch((e) => { if (my === seq) body.replaceChildren(notice("warning", e.message)); });
+}
+$("v-close").onclick = closeViewer;
+$("scrim").onclick = closeViewer;
+$("v-prev").onclick = () => step(-1);
+$("v-next").onclick = () => step(1);
+document.addEventListener("keydown", (e) => {
+  if (!state.view || dialog.open) return;
+  if (e.key === "Escape") { e.preventDefault(); closeViewer(); }
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || "");
+  if (!typing && (e.key === "j" || e.key === "ArrowDown")) { e.preventDefault(); step(1); }
+  if (!typing && (e.key === "k" || e.key === "ArrowUp")) { e.preventDefault(); step(-1); }
+});
+
+// ---- 삭제 (격리 폴더로 옮기기) ---------------------------------------------
+const dialog = $("confirm");
+$("c-ok").append(icon("trash"), "격리 폴더로 옮기기");
+let pending = null;
+function confirmDelete(r, from) {
+  pending = { r, from };
+  $("c-name").textContent = tilde(r.path);
+  dialog.showModal();
+  $("c-cancel").focus();
+}
+$("c-cancel").onclick = () => dialog.close();
+dialog.addEventListener("close", () => { if (pending && pending.from && document.contains(pending.from)) pending.from.focus(); pending = null; });
+$("c-ok").onclick = async () => {
+  const { r } = pending;
+  const ok = $("c-ok");
+  ok.disabled = true;
+  try {
+    const res = await api("/api/trash", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: r.path }) });
+    dialog.close();
+    removeRow(r);
+    toast(`${r.name} 을(를) 격리 폴더로 옮겼습니다`, "되돌리기", () => undoDelete(r, res.batch));
+  } catch (e) {
+    dialog.close();
+    toast(`삭제하지 못했습니다. ${e.message}`);
+  } finally { ok.disabled = false; }
+};
+function removeRow(r) {
+  const i = ROWS.indexOf(r);
+  if (i >= 0) ROWS.splice(i, 1);
+  BY_PATH.delete(r.path);
+  if (state.view === r.path) {
+    const j = LIST.indexOf(r), next = LIST[j + 1] || LIST[j - 1];
+    $("viewer").dataset.path = "";
+    if (next && next !== r) navigate({ view: next.path }, { push: false }); else closeViewer();
+  }
+  renderHeader(); render();
+}
+async function undoDelete(r, batch) {
+  try {
+    await api("/api/undo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ batch }) });
+    ROWS.push(r); BY_PATH.set(r.path, r);
+    renderHeader(); render();
+    toast(`${r.name} 을(를) 되돌렸습니다`);
+  } catch (e) { toast(`되돌리지 못했습니다. ${e.message}`); }
+}
+let toastTimer = 0;
+function toast(msg, action, fn) {
+  const t = $("toast");
+  t.replaceChildren(el("span", { className: "msg", textContent: msg }));
+  if (action) {
+    const b = el("button", { type: "button" }, icon("arrow-counter-clockwise"), " " + action);
+    b.onclick = () => { t.classList.remove("show"); fn(); };
+    t.append(b);
+  }
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), action ? 8000 : 3000);
+}
+
+// ---- 그리기 --------------------------------------------------------------
+function render() {
+  $("hidden").setAttribute("aria-pressed", String(state.hidden));
+  renderKinds();
+  renderSide();
+  renderCrumbs();
+  renderList();
+  renderViewer();
+}
+
+let timer = 0;
+$("q").addEventListener("input", (e) => {
+  clearTimeout(timer);
+  timer = setTimeout(() => navigate({ q: e.target.value.trim() }, { push: false }), 150);
+});
+$("sort").onchange = (e) => navigate({ sort: e.target.value }, { push: false });
+$("age").onchange = (e) => navigate({ age: Number(e.target.value) }, { push: false });
+$("hidden").onclick = () => {
+  state.hidden = !state.hidden;
+  try { localStorage.setItem("hub.hidden", state.hidden ? "1" : "0"); } catch (err) {}
+  render();
+};
+
+// 떠 있는 바 높이만큼 옆 목록의 고정 위치를 내린다.
+const bar = $("bar");
+const syncBar = () => document.documentElement.style.setProperty("--bar-h", bar.offsetHeight + "px");
+if ("ResizeObserver" in window) new ResizeObserver(syncBar).observe(bar); else syncBar();
+
+// 처음 보일 때 한 번만 올라오며 나타난다.
+function reveal(nodes) {
+  if (!("IntersectionObserver" in window)) return;
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+  }, { rootMargin: "0px 0px -8% 0px" });
+  nodes.forEach((n) => { n.classList.add("reveal"); io.observe(n); });
+}
+
+if (!history.state) history.replaceState({ depth: 0 }, "");
+fromHash();
+syncControls();
+renderHeader();
+render();
+reveal([...document.querySelectorAll(".kpi, .layout > *")]);
+</script>
+</body>
+</html>

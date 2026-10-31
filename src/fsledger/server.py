@@ -1,0 +1,264 @@
+"""로컬 허브 서버 — 127.0.0.1 에서만 열고, 실행마다 새 토큰을 요구한다.
+
+file:// 페이지는 다른 파일을 읽을 수 없어서, 미리보기·앱에서 열기는 이 서버를 거친다.
+열 수 있는 파일은 원장의 현재 상태에 있고 허브 종류에 들어가는 문서·데이터뿐이다.
+"""
+
+import hmac
+import json
+import os
+import secrets
+import sqlite3
+import subprocess
+import sys
+import threading
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Any, Callable, Dict, Optional, Set, Tuple
+from urllib.parse import parse_qs, urlparse
+
+from fsledger import hub, ops, page, preview
+from fsledger.config import Config
+from fsledger.db import connect
+
+_CHUNK = 1024 * 1024
+
+
+def resolve_allowed(conn: sqlite3.Connection, cfg: Config, raw: str) -> Optional[Path]:
+    """요청한 경로가 열어도 되는 파일이면 Path, 아니면 None.
+
+    경로는 원장에 적힌 그대로여야 하고(../ 우회 차단), 실제 위치도 추적 루트 안이어야 한다
+    (스캔 뒤 심볼릭 링크로 바꿔치기 차단).
+    """
+    row = conn.execute(
+        "SELECT in_repo FROM file_versions WHERE path=? AND valid_to IS NULL", (raw,)
+    ).fetchone()
+    if row is None or hub.kind_of(raw, bool(row[0])) is None:
+        return None
+    real = os.path.realpath(raw)
+    roots = [os.path.realpath(r) + os.sep for r in cfg.roots]
+    if not any(real.startswith(r) for r in roots) or not os.path.isfile(real):
+        return None
+    return Path(raw)
+
+
+class HubApp:
+    """서버 상태: 설정, 토큰, 마지막으로 만든 페이지."""
+
+    def __init__(self, cfg: Config, port: int) -> None:
+        self.cfg = cfg
+        self.port = port
+        self.token = secrets.token_urlsafe(24)
+        self._lock = threading.Lock()
+        self._html: Optional[str] = None
+        self._snapshot: Optional[int] = None
+        self.batches: Set[str] = set()  # 이 서버에서 만든 삭제 배치만 되돌릴 수 있다
+
+    def conn(self) -> sqlite3.Connection:
+        """요청마다 새 연결 (sqlite 연결은 스레드끼리 나눠 쓰지 않는다)."""
+        return connect(self.cfg.db_path)
+
+    def page_html(self) -> str:
+        """스냅샷이 바뀌었을 때만 허브 페이지를 다시 만든다."""
+        conn = self.conn()
+        try:
+            snap = conn.execute("SELECT MAX(id) FROM snapshots").fetchone()[0]
+            with self._lock:
+                if self._html is None or snap != self._snapshot:
+                    self._html = page.build("hub.html", hub.build_data(conn, self.cfg))
+                    self._snapshot = snap
+                return self._html
+        finally:
+            conn.close()
+
+    def url(self) -> str:
+        """브라우저로 열 주소."""
+        return f"http://127.0.0.1:{self.port}/?t={self.token}"
+
+
+def make_handler(app: HubApp) -> type:
+    """앱에 묶인 요청 처리 클래스를 만든다."""
+
+    class Handler(BaseHTTPRequestHandler):
+        server_version = "fsledger"
+
+        def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+            return  # 경로가 로그에 남지 않게 한다
+
+        # --- 공통 검사 -----------------------------------------------------
+        def _host_ok(self) -> bool:
+            # DNS rebinding 차단: 다른 이름으로 들어온 요청은 받지 않는다.
+            host = self.headers.get("Host", "")
+            return host in (f"127.0.0.1:{app.port}", f"localhost:{app.port}")
+
+        def _token_ok(self, given: Optional[str]) -> bool:
+            return given is not None and hmac.compare_digest(given, app.token)
+
+        def _query(self) -> Tuple[str, Dict[str, str]]:
+            u = urlparse(self.path)
+            return u.path, {k: v[0] for k, v in parse_qs(u.query).items()}
+
+        def _send(self, status: int, body: bytes, ctype: str) -> None:
+            self.send_response(status)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _json(self, status: int, data: Dict[str, Any]) -> None:
+            self._send(status, json.dumps(data, ensure_ascii=False).encode(), "application/json")
+
+        def _deny(self, status: int = HTTPStatus.FORBIDDEN) -> None:
+            self._json(status, {"error": "허용되지 않은 요청입니다"})
+
+        def _file(self, q: Dict[str, str]) -> Optional[Path]:
+            conn = app.conn()
+            try:
+                return resolve_allowed(conn, app.cfg, q.get("path", ""))
+            finally:
+                conn.close()
+
+        # --- 라우팅 ---------------------------------------------------------
+        def do_GET(self) -> None:  # noqa: N802
+            if not self._host_ok():
+                return self._deny()
+            route, q = self._query()
+            if route == "/":
+                if not self._token_ok(q.get("t")):
+                    return self._send(
+                        HTTPStatus.FORBIDDEN,
+                        "fsledger serve 가 출력한 주소로 열어 주세요.".encode(),
+                        "text/plain; charset=utf-8",
+                    )
+                html = app.page_html().encode()
+                return self._send(HTTPStatus.OK, html, "text/html; charset=utf-8")
+            if route == "/api/preview":
+                if not self._token_ok(self.headers.get("X-Fsledger-Token")):
+                    return self._deny()
+                path = self._file(q)
+                if path is None:
+                    return self._deny(HTTPStatus.NOT_FOUND)
+                return self._json(HTTPStatus.OK, preview.preview(path))
+            if route == "/api/raw":
+                # iframe 은 헤더를 못 붙이므로 토큰을 쿼리로 받는다. PDF 만 내보낸다.
+                if not self._token_ok(q.get("t")):
+                    return self._deny()
+                path = self._file(q)
+                mime = preview.INLINE_EXTS.get(path.suffix.lower(), "") if path else ""
+                if path is None or not mime:
+                    return self._deny(HTTPStatus.NOT_FOUND)
+                return self._stream(path, mime)
+            return self._deny(HTTPStatus.NOT_FOUND)
+
+        def do_POST(self) -> None:  # noqa: N802
+            if not self._host_ok() or not self._token_ok(self.headers.get("X-Fsledger-Token")):
+                return self._deny()
+            route, _ = self._query()
+            length = min(int(self.headers.get("Content-Length", "0") or 0), 64 * 1024)
+            try:
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except ValueError:
+                return self._deny(HTTPStatus.BAD_REQUEST)
+            if not isinstance(body, dict):
+                return self._deny(HTTPStatus.BAD_REQUEST)
+            if route == "/api/open":
+                return self._open(body)
+            if route == "/api/trash":
+                return self._trash(body)
+            if route == "/api/undo":
+                return self._undo(body)
+            return self._deny(HTTPStatus.NOT_FOUND)
+
+        def _open(self, body: Dict[str, Any]) -> None:
+            path = self._file({"path": str(body.get("path", ""))})
+            if path is None:
+                return self._deny(HTTPStatus.NOT_FOUND)
+            if sys.platform != "darwin":
+                return self._json(HTTPStatus.NOT_IMPLEMENTED, {"error": "macOS 에서만 됩니다"})
+            args = ["open", "-R", str(path)] if body.get("reveal") else ["open", str(path)]
+            subprocess.run(args, check=False, timeout=10)
+            return self._json(HTTPStatus.OK, {"ok": True})
+
+        def _trash(self, body: Dict[str, Any]) -> None:
+            # 바로 지우지 않고 격리 폴더로 옮긴다. 작업 기록에 남아 undo 로 되돌린다.
+            path = self._file({"path": str(body.get("path", ""))})
+            if path is None:
+                return self._deny(HTTPStatus.NOT_FOUND)
+            batch = ops.new_batch_id("clean")
+            src = str(path)
+            move = ops.Move(
+                "quarantine", src, ops.quarantine_target(app.cfg, batch, src), "허브에서 삭제"
+            )
+            conn = app.conn()
+            try:
+                res = ops.apply(conn, [move], batch)
+            finally:
+                conn.close()
+            if res.done != 1:
+                return self._json(
+                    HTTPStatus.CONFLICT,
+                    {"error": "옮기지 못했습니다. 파일이 열려 있는지 확인하세요"},
+                )
+            app.batches.add(batch)
+            return self._json(HTTPStatus.OK, {"ok": True, "batch": batch})
+
+        def _undo(self, body: Dict[str, Any]) -> None:
+            batch = str(body.get("batch", ""))
+            if batch not in app.batches:
+                return self._deny(HTTPStatus.NOT_FOUND)
+            conn = app.conn()
+            try:
+                res = ops.undo(conn, app.cfg, batch)
+            finally:
+                conn.close()
+            if res.done != 1:
+                return self._json(
+                    HTTPStatus.CONFLICT,
+                    {"error": "되돌리지 못했습니다. 원래 자리에 같은 이름의 파일이 있습니다"},
+                )
+            app.batches.discard(batch)
+            return self._json(HTTPStatus.OK, {"ok": True})
+
+        def _stream(self, path: Path, mime: str) -> None:
+            size = path.stat().st_size
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Length", str(size))
+            self.send_header("Content-Disposition", "inline")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            with path.open("rb") as f:
+                while chunk := f.read(_CHUNK):
+                    self.wfile.write(chunk)
+
+    return Handler
+
+
+def make_server(cfg: Config, port: int) -> Tuple[ThreadingHTTPServer, HubApp]:
+    """127.0.0.1 에 묶은 서버. 포트가 쓰이고 있으면 빈 포트를 고른다."""
+    try:
+        httpd = ThreadingHTTPServer(("127.0.0.1", port), BaseHTTPRequestHandler)
+    except OSError:
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), BaseHTTPRequestHandler)
+    app = HubApp(cfg, httpd.server_address[1])
+    httpd.RequestHandlerClass = make_handler(app)
+    httpd.daemon_threads = True
+    return httpd, app
+
+
+def serve(cfg: Config, port: int, on_ready: Optional[Callable[[HubApp], None]] = None) -> None:
+    """서버를 띄우고 Ctrl+C 까지 기다린다."""
+    httpd, app = make_server(cfg, port)
+    if on_ready is not None:
+        on_ready(app)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        httpd.server_close()

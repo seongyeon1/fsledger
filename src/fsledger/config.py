@@ -111,6 +111,11 @@ class Config:
         """대시보드 HTML 경로."""
         return self.data_dir / "dashboard.html"
 
+    @property
+    def hub_path(self) -> Path:
+        """문서·데이터 허브 HTML 경로."""
+        return self.data_dir / "hub.html"
+
 
 def _expand(p: str) -> Path:
     return Path(os.path.expanduser(p)).resolve()
