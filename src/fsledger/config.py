@@ -97,6 +97,8 @@ class Config:
     purge_after_days: int = 0
     # 허브 본문 검색용 색인(search.db). 끄면 이름·경로로만 찾는다.
     fulltext: bool = True
+    # 매일 자동 실행 때 다른 폴더에 같은 내용이 있는 다운로드 사본을 격리할지.
+    clean_download_dupes: bool = False
     organize_roots: List[OrganizeRoot] = field(
         default_factory=lambda: [
             OrganizeRoot(HOME / "Downloads", group_by_month=True, auto=True),
@@ -156,6 +158,7 @@ def load_config(path: Optional[Path] = None) -> Config:
     cfg.rescan_minutes = max(int(raw.get("rescan_minutes", cfg.rescan_minutes)), 0)
     cfg.purge_after_days = max(int(raw.get("purge_after_days", cfg.purge_after_days)), 0)
     cfg.fulltext = bool(raw.get("fulltext", cfg.fulltext))
+    cfg.clean_download_dupes = bool(raw.get("clean_download_dupes", cfg.clean_download_dupes))
     if "organize" in raw:
         cfg.organize_roots = [
             OrganizeRoot(

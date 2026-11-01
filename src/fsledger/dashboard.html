@@ -349,7 +349,7 @@ $("junk-kpis").innerHTML = [
   ["review 후보", fmtB(S.review_bytes), "확인이 필요한 것"],
   ["후보 수", fmtN(S.total), S.total > S.items.length ? `규칙별 상위 300개씩 표시` : "전체 표시"],
 ].map(([l, v, s]) => `<div class="kpi"><div class="label caption-2">${l}</div><div class="value heading-5">${v}</div><div class="sub caption-5">${s}</div></div>`).join("");
-const RULE = {"os-litter":"OS 메타데이터","appledouble":"AppleDouble 조각","office-lock":"Office 잠금 파일","partial-download":"미완료 다운로드","empty-file":"빈 파일","old-installer":"오래된 설치 파일","stale-large-download":"오래된 대용량 다운로드","extracted-archive":"이미 푼 압축 파일","cache-dir":"캐시 디렉터리","stale-deps":"안 쓰는 프로젝트 의존성","duplicate":"중복 사본"};
+const RULE = {"os-litter":"OS 메타데이터","appledouble":"AppleDouble 조각","office-lock":"Office 잠금 파일","partial-download":"미완료 다운로드","empty-file":"빈 파일","old-installer":"오래된 설치 파일","stale-large-download":"오래된 대용량 다운로드","extracted-archive":"이미 푼 압축 파일","cache-dir":"캐시 디렉터리","stale-deps":"안 쓰는 프로젝트 의존성","duplicate":"중복 사본","download-dupe":"다운로드 사본"};
 $("rule-table").innerHTML = `<tr><th>규칙</th><th>등급</th><th class="num">개수</th><th class="num">용량</th></tr>` +
   S.rules.map((r) => `<tr><td>${RULE[r.rule] || r.rule} <span class="dim mono">${r.rule}</span></td><td><span class="pill ${r.level}">${r.level}</span></td><td class="num">${fmtN(r.n)}</td><td class="num">${fmtB(r.bytes)}</td></tr>`).join("");
 $("clean-cmd").textContent = `fsledger clean                          # 후보 보기 (아무것도 안 옮김)

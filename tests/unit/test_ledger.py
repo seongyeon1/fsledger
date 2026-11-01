@@ -373,3 +373,52 @@ class TestPurge:
         cfg.purge_after_days = 30
         cli.cmd_auto(conn, cfg, args)
         assert not (cfg.quarantine_dir / old).exists()
+
+
+class TestDownloadDupes:
+    def test_auto_quarantines_download_copy_only_when_original_remains(self, env: tuple) -> None:
+        """다른 폴더에 원본이 있는 다운로드 사본만 격리하고, 원본은 남겨야 한다."""
+        # Given
+        from fsledger import cli
+
+        cfg, conn, root = env
+        original = _write(root / "docs" / "report.pdf", b"X" * 5000)
+        copy = _write(root / "Downloads" / "report (1).pdf", b"X" * 5000)
+        both_dl = [_write(root / "Downloads" / n, b"Z" * 5000) for n in ("a.zip", "a (1).zip")]
+        args = cli.build_parser().parse_args(["auto"])
+        cfg.organize_min_age_days = 9999  # 이 테스트에서는 월별 정리를 하지 않는다
+        run_scan(conn, cfg)
+        groups, suggestions = cli._analyze(conn, cfg, quiet=True)
+        assert {s.path: s.rule for s in suggestions if "dupe" in s.rule} == {
+            str(copy): "download-dupe"
+        }
+
+        # When: 기본값(끔)이면 옮기지 않는다
+        cli.cmd_auto(conn, cfg, args)
+        assert copy.exists()
+
+        # When: 켜면 다운로드 사본만 격리한다
+        cfg.clean_download_dupes = True
+        cli.cmd_auto(conn, cfg, args)
+
+        # Then
+        assert original.exists() and not copy.exists()
+        assert all(p.exists() for p in both_dl)  # 둘 다 다운로드 안이면 사람이 고른다
+
+    def test_quarantine_skips_duplicate_when_original_is_gone(self, env: tuple) -> None:
+        """원본이 그사이 사라졌으면 사본을 옮기지 않아야 한다."""
+        # Given
+        from fsledger import cli
+
+        cfg, conn, root = env
+        original = _write(root / "docs" / "report.pdf", b"X" * 5000)
+        copy = _write(root / "Downloads" / "report (1).pdf", b"X" * 5000)
+        run_scan(conn, cfg)
+        _, suggestions = cli._analyze(conn, cfg, quiet=True)
+        original.unlink()
+
+        # When
+        _, res = cli._quarantine(conn, cfg, [s for s in suggestions if s.rule == "download-dupe"])
+
+        # Then
+        assert res.done == 0 and copy.exists()

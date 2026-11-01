@@ -91,7 +91,9 @@ def build_data(
         "dupes": {
             "groups": len(groups),
             "wasted": sum(g.wasted for g in groups),
-            "wasted_outside_repos": sum(s.bytes for s in suggestions if s.rule == "duplicate"),
+            "wasted_outside_repos": sum(
+                s.bytes for s in suggestions if s.rule in ("duplicate", "download-dupe")
+            ),
             "top": [
                 {"hash": g.content_hash[:12], "size": g.size, "paths": g.paths}
                 for g in groups[:150]

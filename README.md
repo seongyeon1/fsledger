@@ -133,6 +133,7 @@ roots = [
 fsledger dupes                               # 중복 묶음 (맨 위가 남길 원본)
 fsledger clean                               # safe 후보 미리보기
 fsledger clean --apply                       # safe 후보를 ~/.fsledger/quarantine/<batch>/ 로 이동
+fsledger clean --apply --rule download-dupe  # 원본이 다른 폴더에 있는 다운로드 사본만
 fsledger clean --apply --level review --rule duplicate --rule extracted-archive
 fsledger organize                            # 최상위 낱개 파일 → 카테고리 폴더 계획
 fsledger organize --apply --root ~/Downloads # 실행
@@ -157,7 +158,9 @@ fsledger schedule remove
 ```
 
 매일 지정 시각에 `fsledger auto`가 돈다: 중단 작업 복구 → 스캔 → `auto = true` 루트(기본: Downloads)
-정리 → 대시보드 갱신. 삭제 후보는 자동으로 옮기지 않는다. 로그는 `~/.fsledger/auto.log`.
+정리 → 대시보드 갱신. 삭제 후보는 자동으로 옮기지 않는다. 단, `clean_download_dupes = true`면
+다른 폴더에 같은 내용의 원본이 있는 다운로드 사본(`download-dupe` 규칙)을 격리한다. 옮기기 직전에
+원본이 아직 있는지 다시 확인한다. 로그는 `~/.fsledger/auto.log`.
 
 ## 설정 (`~/.fsledger/config.toml`, 선택)
 
@@ -169,6 +172,7 @@ hwp_editor = false          # true 면 허브에서 한글 편집 (위 설명 �
 rescan_minutes = 15         # serve 중 자동 스캔 간격(분), 0 이면 끔
 purge_after_days = 0        # 매일 자동 실행 때 격리한 지 N일 지난 묶음을 영구 삭제, 0 이면 끔
 fulltext = true             # 허브 본문 검색 색인(search.db), false 면 이름·경로로만 찾기
+clean_download_dupes = false  # true 면 매일 자동 실행 때 원본이 따로 있는 다운로드 사본을 격리
 
 [[organize]]
 path = "~/Downloads"

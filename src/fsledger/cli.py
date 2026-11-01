@@ -182,6 +182,19 @@ def cmd_dupes(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -
     return 0
 
 
+def _quarantine(
+    conn: sqlite3.Connection, cfg: Config, chosen: List[junk.Suggestion]
+) -> tuple[str, ops.BatchResult]:
+    """후보를 격리 폴더로 옮긴다. 중복은 원본이 아직 있을 때만 옮긴다."""
+    batch = ops.new_batch_id("clean")
+    moves = [
+        ops.Move("quarantine", s.path, ops.quarantine_target(cfg, batch, s.path), s.rule)
+        for s in chosen
+        if not s.keep or os.path.exists(s.keep)
+    ]
+    return batch, ops.apply(conn, moves, batch)
+
+
 def cmd_clean(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -> int:
     _, suggestions = _analyze(conn, cfg)
     levels = {junk.SAFE} if args.level == "safe" else {junk.SAFE, junk.REVIEW}
@@ -197,12 +210,7 @@ def cmd_clean(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) -
     if not args.apply:
         print("미리보기입니다. 실제로 옮기려면 --apply 를 붙이세요 (격리 폴더로 이동, undo 가능).")
         return 0
-    batch = ops.new_batch_id("clean")
-    moves = [
-        ops.Move("quarantine", s.path, ops.quarantine_target(cfg, batch, s.path), s.rule)
-        for s in chosen
-    ]
-    res = ops.apply(conn, moves, batch)
+    batch, res = _quarantine(conn, cfg, chosen)
     print(
         f"격리 완료: {res.done:,}개 · 실패 {res.failed} · 건너뜀 {res.skipped}\n"
         f"배치 {batch}  →  되돌리기: fsledger undo {batch}"
@@ -270,6 +278,14 @@ def cmd_auto(conn: sqlite3.Connection, cfg: Config, args: argparse.Namespace) ->
         f"[{time.strftime('%F %T')}] 스냅샷 #{res.snapshot_id} "
         f"+{res.added} ~{res.modified} -{res.deleted} >{res.moved}"
     )
+    if cfg.clean_download_dupes:
+        _, suggestions = _analyze(conn, cfg, quiet=True)
+        chosen = [s for s in suggestions if s.rule == "download-dupe"]
+        if chosen:
+            batch, r = _quarantine(conn, cfg, chosen)
+            print(f"  다운로드 사본 {r.done}개 격리 (배치 {batch})")
+            if r.done:
+                run_scan(conn, cfg)
     plan = organize.plan(cfg, set(), only_auto=True)
     if plan:
         batch = ops.new_batch_id("organize")

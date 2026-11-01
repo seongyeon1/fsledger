@@ -41,6 +41,7 @@ class Suggestion:
     bytes: int
     level: str
     is_dir: bool = False
+    keep: str = ""  # 중복일 때 남는 원본. 옮기기 직전에 아직 있는지 다시 본다.
 
 
 def _file_rules(conn: sqlite3.Connection, now_ns: int) -> Iterable[Suggestion]:
@@ -136,7 +137,14 @@ def _dupe_rules(groups: List[DupeGroup], repo_files: Set[str]) -> Iterable[Sugge
         for path in g.paths[1:]:
             if path in repo_files:
                 continue  # 저장소 안 파일은 git 이 관리한다
-            yield Suggestion(path, "duplicate", f"중복 — 원본 유지: {keep}", g.size, REVIEW)
+            if "/Downloads/" in path and "/Downloads/" not in keep:
+                # 다른 폴더에 원본이 있는 다운로드 사본은 지워도 잃는 게 없다.
+                reason = f"다운로드 사본 — 원본: {keep}"
+                yield Suggestion(path, "download-dupe", reason, g.size, SAFE, keep=keep)
+                continue
+            yield Suggestion(
+                path, "duplicate", f"중복 — 원본 유지: {keep}", g.size, REVIEW, keep=keep
+            )
 
 
 def collect(conn: sqlite3.Connection, groups: List[DupeGroup]) -> List[Suggestion]:
